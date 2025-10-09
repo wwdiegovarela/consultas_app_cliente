@@ -58,6 +58,8 @@ TABLE_CONTACTOS = f"{PROJECT_ID}.{DATASET_APP}.contactos"
 TABLE_INST_CONTACTO = f"{PROJECT_ID}.{DATASET_APP}.instalacion_contacto"
 TABLE_MENSAJES = f"{PROJECT_ID}.{DATASET_APP}.mensajes_whatsapp"
 TABLE_AUDITORIA = f"{PROJECT_ID}.{DATASET_APP}.auditoria"
+TABLE_ROLES = f"{PROJECT_ID}.{DATASET_APP}.roles"
+TABLE_USUARIO_CONTACTOS = f"{PROJECT_ID}.{DATASET_APP}.usuario_contactos"
 
 # Configuración de semáforos (pueden ser variables de entorno)
 SEMAFORO_VERDE = float(os.getenv("SEMAFORO_VERDE", "0.95"))     # 95% o más
@@ -79,6 +81,7 @@ class UsuarioCreate(BaseModel):
     password: str
     nombre_completo: str
     cliente_rol: str
+    rol_id: str = "CLIENTE"
     cargo: Optional[str] = None
     telefono: Optional[str] = None
     ver_todas_instalaciones: bool = False
@@ -92,13 +95,19 @@ class ContactoCreate(BaseModel):
     email: Optional[str] = None
 
 
+class EnviarMensajeRequest(BaseModel):
+    instalaciones: List[str]
+    mensaje: str
+
+
 # ============================================
 # DEPENDENCIAS - AUTENTICACIÓN
 # ============================================
 
 async def verify_firebase_token(authorization: Optional[str] = Header(None)) -> dict:
     """
-    Valida el token de Firebase y retorna los datos del usuario.
+    Valida el token de Firebase y retorna los datos del usuario CON PERMISOS.
+    Implementa migración automática de firebase_uid.
     """
     if not authorization:
         raise HTTPException(status_code=401, detail="Token de autorización requerido")
@@ -109,12 +118,96 @@ async def verify_firebase_token(authorization: Optional[str] = Header(None)) -> 
         
         # Verificar el token con Firebase Admin
         decoded_token = auth.verify_id_token(token)
+        firebase_uid = decoded_token["uid"]
+        user_email = decoded_token.get("email")
         
+        # Buscar usuario con sus permisos usando la vista
+        try:
+            check_query = f"""
+                SELECT 
+                    email_login,
+                    nombre_completo,
+                    cliente_rol,
+                    rol_id,
+                    nombre_rol,
+                    puede_ver_cobertura,
+                    puede_ver_encuestas,
+                    puede_enviar_mensajes,
+                    puede_ver_empresas,
+                    puede_ver_metricas_globales,
+                    puede_ver_trabajadores,
+                    puede_ver_mensajes_recibidos,
+                    es_admin,
+                    ver_todas_instalaciones,
+                    usuario_activo
+                FROM `{PROJECT_ID}.{DATASET_APP}.v_permisos_usuarios`
+                WHERE email_login = @user_email
+                LIMIT 1
+            """
+            
+            job_config = bigquery.QueryJobConfig(
+                query_parameters=[
+                    bigquery.ScalarQueryParameter("user_email", "STRING", user_email)
+                ]
+            )
+            
+            query_job = bq_client.query(check_query, job_config=job_config)
+            results = list(query_job.result())
+            
+            if not results:
+                raise HTTPException(status_code=404, detail="Usuario no encontrado en la base de datos")
+            
+            user_data = results[0]
+            
+            if not user_data.usuario_activo:
+                raise HTTPException(status_code=403, detail="Usuario inactivo")
+            
+            # Actualizar firebase_uid si es necesario
+            update_query = f"""
+                UPDATE `{TABLE_USUARIOS}`
+                SET firebase_uid = @firebase_uid
+                WHERE email_login = @user_email
+                  AND (firebase_uid IS NULL OR firebase_uid != @firebase_uid)
+            """
+            
+            job_config_update = bigquery.QueryJobConfig(
+                query_parameters=[
+                    bigquery.ScalarQueryParameter("firebase_uid", "STRING", firebase_uid),
+                    bigquery.ScalarQueryParameter("user_email", "STRING", user_email)
+                ]
+            )
+            
+            bq_client.query(update_query, job_config=job_config_update).result()
+        
+        except HTTPException:
+            raise
+        except Exception as e:
+            print(f"⚠️ Error en verificación de usuario: {str(e)}")
+            raise HTTPException(status_code=500, detail="Error al verificar usuario")
+        
+        # Retornar datos del usuario CON PERMISOS
         return {
-            "uid": decoded_token["uid"],
-            "email": decoded_token.get("email"),
+            "uid": firebase_uid,
+            "email": user_email,
+            "nombre_completo": user_data.nombre_completo,
+            "cliente_rol": user_data.cliente_rol,
+            "rol_id": user_data.rol_id,
+            "nombre_rol": user_data.nombre_rol,
+            "permisos": {
+                "puede_ver_cobertura": user_data.puede_ver_cobertura,
+                "puede_ver_encuestas": user_data.puede_ver_encuestas,
+                "puede_enviar_mensajes": user_data.puede_enviar_mensajes,
+                "puede_ver_empresas": user_data.puede_ver_empresas,
+                "puede_ver_metricas_globales": user_data.puede_ver_metricas_globales,
+                "puede_ver_trabajadores": user_data.puede_ver_trabajadores,
+                "puede_ver_mensajes_recibidos": user_data.puede_ver_mensajes_recibidos,
+                "es_admin": user_data.es_admin,
+            },
+            "ver_todas_instalaciones": user_data.ver_todas_instalaciones,
             "email_verified": decoded_token.get("email_verified", False),
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=401, detail=f"Token inválido: {str(e)}")
 
@@ -125,9 +218,41 @@ async def verify_admin_token(authorization: Optional[str] = Header(None)) -> dic
     """
     user = await verify_firebase_token(authorization)
     
-    # TODO: Implementar lógica de roles de admin
-    # Por ahora, cualquier usuario autenticado puede administrar
+    # Verificar que el usuario tenga permisos de admin
+    if not user.get("permisos", {}).get("es_admin", False):
+        raise HTTPException(
+            status_code=403, 
+            detail="Acceso denegado. Se requieren permisos de administrador."
+        )
     
+    return user
+
+
+async def verificar_permiso_cobertura(user: dict = Depends(verify_firebase_token)) -> dict:
+    """Verifica que el usuario pueda ver cobertura."""
+    if not user.get("permisos", {}).get("puede_ver_cobertura", False):
+        raise HTTPException(status_code=403, detail="No tienes permiso para ver cobertura")
+    return user
+
+
+async def verificar_permiso_encuestas(user: dict = Depends(verify_firebase_token)) -> dict:
+    """Verifica que el usuario pueda ver encuestas."""
+    if not user.get("permisos", {}).get("puede_ver_encuestas", False):
+        raise HTTPException(status_code=403, detail="No tienes permiso para ver encuestas")
+    return user
+
+
+async def verificar_permiso_mensajes(user: dict = Depends(verify_firebase_token)) -> dict:
+    """Verifica que el usuario pueda enviar mensajes."""
+    if not user.get("permisos", {}).get("puede_enviar_mensajes", False):
+        raise HTTPException(status_code=403, detail="No tienes permiso para enviar mensajes")
+    return user
+
+
+async def verificar_permiso_empresas(user: dict = Depends(verify_firebase_token)) -> dict:
+    """Verifica que el usuario pueda ver empresas."""
+    if not user.get("permisos", {}).get("puede_ver_empresas", False):
+        raise HTTPException(status_code=403, detail="No tienes permiso para ver empresas")
     return user
 
 
@@ -174,7 +299,7 @@ async def health_check():
 # ============================================
 
 @app.get("/api/cobertura/instantanea/general")
-async def get_cobertura_general(user: dict = Depends(verify_firebase_token)):
+async def get_cobertura_general(user: dict = Depends(verificar_permiso_cobertura)):
     """
     Obtiene el % de cobertura general del cliente (todos los turnos activos ahora).
     """
@@ -242,7 +367,7 @@ async def get_cobertura_general(user: dict = Depends(verify_firebase_token)):
 
 
 @app.get("/api/cobertura/instantanea/por-instalacion")
-async def get_cobertura_por_instalacion(user: dict = Depends(verify_firebase_token)):
+async def get_cobertura_por_instalacion(user: dict = Depends(verificar_permiso_cobertura)):
     """
     Obtiene la cobertura instantánea por instalación con semáforo.
     """
@@ -320,7 +445,7 @@ async def get_cobertura_por_instalacion(user: dict = Depends(verify_firebase_tok
 @app.get("/api/cobertura/instantanea/detalle/{instalacion_rol}")
 async def get_detalle_instalacion(
     instalacion_rol: str,
-    user: dict = Depends(verify_firebase_token)
+    user: dict = Depends(verificar_permiso_cobertura)
 ):
     """
     Obtiene el detalle de turnos de una instalación específica (para el pop-up).
@@ -416,7 +541,7 @@ async def get_detalle_instalacion(
 @app.get("/api/cobertura/historico/semanal")
 async def get_cobertura_historica_semanal(
     dias: int = DIAS_HISTORICO_DEFAULT,
-    user: dict = Depends(verify_firebase_token)
+    user: dict = Depends(verificar_permiso_cobertura)
 ):
     """
     Obtiene la cobertura histórica acumulada por semana (últimos N días).
@@ -505,7 +630,7 @@ async def get_cobertura_historica_semanal(
 @app.get("/api/cobertura/historico/por-instalacion")
 async def get_cobertura_historica_por_instalacion(
     dias: int = DIAS_HISTORICO_DEFAULT,
-    user: dict = Depends(verify_firebase_token)
+    user: dict = Depends(verificar_permiso_cobertura)
 ):
     """
     Obtiene la cobertura histórica por instalación y semana.
@@ -652,6 +777,192 @@ async def get_contactos_instalacion(
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al consultar BigQuery: {str(e)}")
+
+
+# ============================================
+# ENDPOINTS - AUTENTICACIÓN Y PERMISOS
+# ============================================
+
+@app.get("/api/auth/me")
+async def get_current_user(user: dict = Depends(verify_firebase_token)):
+    """
+    Obtiene la información del usuario actual con sus permisos.
+    Útil para que la app Flutter sepa qué screens mostrar.
+    """
+    return {
+        "email": user["email"],
+        "nombre_completo": user["nombre_completo"],
+        "cliente_rol": user["cliente_rol"],
+        "rol_id": user["rol_id"],
+        "nombre_rol": user["nombre_rol"],
+        "permisos": user["permisos"],
+        "ver_todas_instalaciones": user["ver_todas_instalaciones"]
+    }
+
+
+# ============================================
+# ENDPOINTS - MENSAJES WHATSAPP
+# ============================================
+
+@app.post("/api/whatsapp/enviar-mensaje")
+async def enviar_mensaje_whatsapp(
+    request: EnviarMensajeRequest,
+    user: dict = Depends(verificar_permiso_mensajes)
+):
+    """
+    Envía un mensaje de WhatsApp a los contactos asignados de las instalaciones seleccionadas.
+    """
+    user_email = user["email"]
+    cliente_rol = user["cliente_rol"]
+    
+    try:
+        mensajes_enviados = []
+        
+        for instalacion_rol in request.instalaciones:
+            # Obtener contactos que el usuario puede contactar
+            query = f"""
+                SELECT DISTINCT 
+                    c.contacto_id, 
+                    c.telefono,
+                    c.nombre_contacto
+                FROM `{TABLE_CONTACTOS}` c
+                INNER JOIN `{TABLE_USUARIO_CONTACTOS}` uc
+                  ON c.contacto_id = uc.contacto_id
+                WHERE uc.email_login = @user_email
+                  AND uc.instalacion_rol = @instalacion_rol
+                  AND uc.puede_contactar = TRUE
+                  AND c.activo = TRUE
+            """
+            
+            job_config = bigquery.QueryJobConfig(
+                query_parameters=[
+                    bigquery.ScalarQueryParameter("user_email", "STRING", user_email),
+                    bigquery.ScalarQueryParameter("instalacion_rol", "STRING", instalacion_rol)
+                ]
+            )
+            
+            query_job = bq_client.query(query, job_config=job_config)
+            contactos = list(query_job.result())
+            
+            # Enviar WhatsApp a cada contacto
+            for contacto in contactos:
+                # TODO: Integrar con API de WhatsApp (Twilio, WhatsApp Business API, etc.)
+                # Por ahora solo registramos el mensaje
+                
+                mensaje_id = str(uuid.uuid4())
+                
+                # Registrar en mensajes_whatsapp
+                insert_query = f"""
+                    INSERT INTO `{TABLE_MENSAJES}` 
+                    (mensaje_id, email_usuario, cliente_rol, instalacion_rol, contacto_id, mensaje, estado, fecha_envio)
+                    VALUES 
+                    (@mensaje_id, @email_usuario, @cliente_rol, @instalacion_rol, @contacto_id, @mensaje, 'pendiente', CURRENT_TIMESTAMP())
+                """
+                
+                job_config_insert = bigquery.QueryJobConfig(
+                    query_parameters=[
+                        bigquery.ScalarQueryParameter("mensaje_id", "STRING", mensaje_id),
+                        bigquery.ScalarQueryParameter("email_usuario", "STRING", user_email),
+                        bigquery.ScalarQueryParameter("cliente_rol", "STRING", cliente_rol),
+                        bigquery.ScalarQueryParameter("instalacion_rol", "STRING", instalacion_rol),
+                        bigquery.ScalarQueryParameter("contacto_id", "STRING", contacto.contacto_id),
+                        bigquery.ScalarQueryParameter("mensaje", "STRING", request.mensaje)
+                    ]
+                )
+                
+                bq_client.query(insert_query, job_config=job_config_insert).result()
+                
+                mensajes_enviados.append({
+                    'mensaje_id': mensaje_id,
+                    'contacto_id': contacto.contacto_id,
+                    'instalacion': instalacion_rol,
+                    'estado': 'pendiente'
+                })
+        
+        return {
+            "success": True,
+            "message": "Mensajes registrados correctamente",
+            "total_enviados": len(mensajes_enviados)
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al enviar mensajes: {str(e)}")
+
+
+@app.get("/api/whatsapp/mensajes-recibidos")
+async def get_mensajes_recibidos(user: dict = Depends(verify_firebase_token)):
+    """
+    Obtiene los mensajes recibidos por un contacto WFSA.
+    Solo disponible para usuarios con rol CONTACTO_WFSA o superior.
+    """
+    user_email = user["email"]
+    
+    # Verificar que el usuario pueda ver mensajes recibidos
+    if not user.get("permisos", {}).get("puede_ver_mensajes_recibidos", False):
+        raise HTTPException(
+            status_code=403, 
+            detail="No tienes permiso para ver mensajes recibidos"
+        )
+    
+    try:
+        query = f"""
+            SELECT 
+                mensaje_id,
+                remitente_email,
+                remitente_nombre,
+                remitente_cliente,
+                instalacion_rol,
+                instalacion_direccion,
+                instalacion_comuna,
+                mensaje,
+                estado,
+                fecha_envio,
+                fecha_lectura,
+                leido
+            FROM `{PROJECT_ID}.{DATASET_APP}.v_mensajes_recibidos`
+            WHERE destinatario_email_app = @user_email
+            ORDER BY fecha_envio DESC
+            LIMIT 100
+        """
+        
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("user_email", "STRING", user_email)
+            ]
+        )
+        
+        query_job = bq_client.query(query, job_config=job_config)
+        results = list(query_job.result())
+        
+        mensajes = []
+        for row in results:
+            mensajes.append({
+                "mensaje_id": row.mensaje_id,
+                "remitente": {
+                    "email": row.remitente_email,
+                    "nombre": row.remitente_nombre,
+                    "cliente": row.remitente_cliente
+                },
+                "instalacion": {
+                    "rol": row.instalacion_rol,
+                    "direccion": row.instalacion_direccion,
+                    "comuna": row.instalacion_comuna
+                },
+                "mensaje": row.mensaje,
+                "estado": row.estado,
+                "fecha_envio": row.fecha_envio.isoformat() if row.fecha_envio else None,
+                "fecha_lectura": row.fecha_lectura.isoformat() if row.fecha_lectura else None,
+                "leido": row.leido
+            })
+        
+        return {
+            "success": True,
+            "total": len(mensajes),
+            "mensajes": mensajes
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al obtener mensajes: {str(e)}")
 
 
 # ============================================
