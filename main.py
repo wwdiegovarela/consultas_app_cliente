@@ -457,7 +457,7 @@ async def get_cobertura_historica_semanal(
           AND ah.dia >= DATE_SUB(CURRENT_DATE(), INTERVAL @dias DAY)
           AND ah.dia <= CURRENT_DATE()
         GROUP BY ah.semana, ah.isoweek, ah.ano
-        ORDER BY ah.ano DESC, ah.isoweek DESC
+        ORDER BY ah.ano ASC, ah.isoweek ASC
         """
         
         job_config = bigquery.QueryJobConfig(
