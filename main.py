@@ -853,8 +853,7 @@ async def get_contactos_instalacion(
           c.email
         FROM `{TABLE_USUARIO_INST}` ui
         INNER JOIN `{TABLE_INST_CONTACTO}` ic 
-          ON ui.cliente_rol = ic.cliente_rol 
-          AND ui.instalacion_rol = ic.instalacion_rol
+          ON ui.instalacion_rol = ic.instalacion_rol
         INNER JOIN `{TABLE_CONTACTOS}` c ON ic.contacto_id = c.contacto_id
         WHERE ui.email_login = @user_email
           AND ui.puede_ver = TRUE
