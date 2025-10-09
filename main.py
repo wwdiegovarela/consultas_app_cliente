@@ -253,7 +253,6 @@ async def get_cobertura_por_instalacion(user: dict = Depends(verify_firebase_tok
         SELECT 
           ci.instalacion_rol,
           ci.zona,
-          ci.sector,
           
           -- Contadores
           COUNT(*) as total_guardias_requeridos,
@@ -279,7 +278,7 @@ async def get_cobertura_por_instalacion(user: dict = Depends(verify_firebase_tok
           AND ci.instalacion_rol = ui.instalacion_rol
         WHERE ui.email_login = @user_email
           AND ui.puede_ver = TRUE
-        GROUP BY ci.instalacion_rol, ci.zona, ci.sector
+        GROUP BY ci.instalacion_rol, ci.zona
         ORDER BY porcentaje_cobertura ASC, ci.instalacion_rol
         """
         
@@ -299,7 +298,6 @@ async def get_cobertura_por_instalacion(user: dict = Depends(verify_firebase_tok
             instalaciones.append({
                 "instalacion_rol": row.instalacion_rol,
                 "zona": row.zona,
-                "sector": row.sector,
                 "total_guardias_requeridos": row.total_guardias_requeridos,
                 "guardias_presentes": row.guardias_presentes,
                 "guardias_ausentes": row.guardias_ausentes,
@@ -336,7 +334,6 @@ async def get_detalle_instalacion(
           ci.cargo,
           FORMAT_DATETIME('%H:%M', ci.her) as hora_entrada_planificada,
           FORMAT_DATETIME('%H:%M', ci.hsr) as hora_salida_planificada,
-          ci.sector,
           
           -- Información del guardia planificado
           ci.rutrol as rut_planificado,
@@ -389,7 +386,6 @@ async def get_detalle_instalacion(
                 "cargo": row.cargo,
                 "hora_entrada_planificada": row.hora_entrada_planificada,
                 "hora_salida_planificada": row.hora_salida_planificada,
-                "sector": row.sector,
                 "rut_planificado": row.rut_planificado,
                 "rut_asistente": row.rut_asistente,
                 "hora_entrada_real": row.hora_entrada_real,
@@ -516,7 +512,6 @@ async def get_cobertura_historica_por_instalacion(
           ah.ano,
           ah.instalacion_rol,
           ah.zona,
-          ah.sector,
           
           CONCAT('Semana ', CAST(ah.isoweek AS STRING), ' - ', CAST(ah.ano AS STRING)) as periodo,
           
@@ -542,7 +537,7 @@ async def get_cobertura_historica_por_instalacion(
           AND ui.puede_ver = TRUE
           AND ah.dia >= DATE_SUB(CURRENT_DATE(), INTERVAL @dias DAY)
           AND ah.dia <= CURRENT_DATE()
-        GROUP BY ah.semana, ah.isoweek, ah.ano, ah.instalacion_rol, ah.zona, ah.sector
+        GROUP BY ah.semana, ah.isoweek, ah.ano, ah.instalacion_rol, ah.zona
         ORDER BY ah.ano DESC, ah.isoweek DESC, ah.instalacion_rol
         """
         
@@ -567,7 +562,6 @@ async def get_cobertura_historica_por_instalacion(
                 "periodo": row.periodo,
                 "instalacion_rol": row.instalacion_rol,
                 "zona": row.zona,
-                "sector": row.sector,
                 "horas_presupuestadas": float(row.horas_presupuestadas) if row.horas_presupuestadas else 0,
                 "horas_entregadas": float(row.horas_entregadas) if row.horas_entregadas else 0,
                 "horas_faltantes": float(row.horas_faltantes) if row.horas_faltantes else 0,
