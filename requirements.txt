@@ -4,3 +4,4 @@ google-cloud-bigquery==3.26.0
 firebase-admin==6.5.0
 python-multipart==0.0.12
 pydantic==2.9.0
+email-validator==2.1.0
