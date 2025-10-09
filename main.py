@@ -279,7 +279,7 @@ async def get_cobertura_por_instalacion(user: dict = Depends(verify_firebase_tok
         WHERE ui.email_login = @user_email
           AND ui.puede_ver = TRUE
         GROUP BY ci.instalacion_rol, ci.zona
-        ORDER BY porcentaje_cobertura ASC, ci.instalacion_rol
+        ORDER BY guardias_ausentes DESC, porcentaje_cobertura ASC, ci.instalacion_rol
         """
         
         job_config = bigquery.QueryJobConfig(
@@ -366,7 +366,7 @@ async def get_detalle_instalacion(
         WHERE ui.email_login = @user_email
           AND ui.puede_ver = TRUE
           AND ci.instalacion_rol = @instalacion_rol
-        ORDER BY ci.her, ci.turno
+        ORDER BY ci.turno, ci.her
         """
         
         job_config = bigquery.QueryJobConfig(
