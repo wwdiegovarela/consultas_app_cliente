@@ -731,13 +731,11 @@ async def get_ppc_total(user: dict = Depends(verificar_permiso_cobertura)):
         query = f"""
         SELECT 
           COUNT(*) as total_ppc
-        FROM `{TABLE_PPC}` ppc
-        WHERE ppc.nombrerol = (
-            SELECT cliente_rol 
-            FROM `{TABLE_USUARIOS}` 
-            WHERE email_login = @user_email
-            LIMIT 1
-          )
+        FROM `{PROJECT_ID}.cr_vistas_reporte.cr_ppc_dia` ppc
+        INNER JOIN `{TABLE_USUARIO_INST}` ui 
+          ON ppc.instalacion_rol = ui.instalacion_rol
+        WHERE ui.email_login = @user_email
+          AND ui.puede_ver = TRUE
         """
         
         job_config = bigquery.QueryJobConfig(
