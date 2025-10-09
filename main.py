@@ -1,4 +1,3 @@
-# cambios
 from fastapi import FastAPI, HTTPException, Depends, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from google.cloud import bigquery
@@ -15,25 +14,25 @@ import uuid
 
 # Inicializar Firebase Admin
 try:
-initialize_app()
+    initialize_app()
 except ValueError:
-# Ya está inicializado
-pass
+    # Ya está inicializado
+    pass
 
 # Inicializar FastAPI
 app = FastAPI(
-title="WFSA BigQuery API",
-version="1.0.0",
-description="API para la app WFSA - Cobertura de guardias en tiempo real"
+    title="WFSA BigQuery API",
+    version="1.0.0",
+    description="API para la app WFSA - Cobertura de guardias en tiempo real"
 )
 
 # Configurar CORS
 app.add_middleware(
-CORSMiddleware,
-allow_origins=os.getenv("CORS_ORIGINS", "*").split(","),
-allow_credentials=True,
-allow_methods=["*"],
-allow_headers=["*"],
+    CORSMiddleware,
+    allow_origins=os.getenv("CORS_ORIGINS", "*").split(","),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Cliente de BigQuery
@@ -76,21 +75,21 @@ ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 # ============================================
 
 class UsuarioCreate(BaseModel):
-email: EmailStr
-password: str
-nombre_completo: str
-cliente_rol: str
-cargo: Optional[str] = None
-telefono: Optional[str] = None
-ver_todas_instalaciones: bool = False
-instalaciones_permitidas: List[str] = []
+    email: EmailStr
+    password: str
+    nombre_completo: str
+    cliente_rol: str
+    cargo: Optional[str] = None
+    telefono: Optional[str] = None
+    ver_todas_instalaciones: bool = False
+    instalaciones_permitidas: List[str] = []
 
 
 class ContactoCreate(BaseModel):
-nombre_contacto: str
-telefono: str
-cargo: Optional[str] = None
-email: Optional[str] = None
+    nombre_contacto: str
+    telefono: str
+    cargo: Optional[str] = None
+    email: Optional[str] = None
 
 
 # ============================================
@@ -98,50 +97,50 @@ email: Optional[str] = None
 # ============================================
 
 async def verify_firebase_token(authorization: Optional[str] = Header(None)) -> dict:
-"""
-Valida el token de Firebase y retorna los datos del usuario.
-"""
-if not authorization:
-    raise HTTPException(status_code=401, detail="Token de autorización requerido")
-
-try:
-    # Extraer el token del header "Bearer <token>"
-    token = authorization.split("Bearer ")[-1]
+    """
+    Valida el token de Firebase y retorna los datos del usuario.
+    """
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Token de autorización requerido")
     
-    # Verificar el token con Firebase Admin
-    decoded_token = auth.verify_id_token(token)
-    
-    return {
-        "uid": decoded_token["uid"],
-        "email": decoded_token.get("email"),
-        "email_verified": decoded_token.get("email_verified", False),
-    }
-except Exception as e:
-    raise HTTPException(status_code=401, detail=f"Token inválido: {str(e)}")
+    try:
+        # Extraer el token del header "Bearer <token>"
+        token = authorization.split("Bearer ")[-1]
+        
+        # Verificar el token con Firebase Admin
+        decoded_token = auth.verify_id_token(token)
+        
+        return {
+            "uid": decoded_token["uid"],
+            "email": decoded_token.get("email"),
+            "email_verified": decoded_token.get("email_verified", False),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Token inválido: {str(e)}")
 
 
 async def verify_admin_token(authorization: Optional[str] = Header(None)) -> dict:
-"""
-Valida que el usuario sea administrador.
-"""
-user = await verify_firebase_token(authorization)
-
-# TODO: Implementar lógica de roles de admin
-# Por ahora, cualquier usuario autenticado puede administrar
-
-return user
+    """
+    Valida que el usuario sea administrador.
+    """
+    user = await verify_firebase_token(authorization)
+    
+    # TODO: Implementar lógica de roles de admin
+    # Por ahora, cualquier usuario autenticado puede administrar
+    
+    return user
 
 
 def calcular_estado_semaforo(porcentaje: float) -> str:
-"""
-Calcula el estado del semáforo según el porcentaje de cobertura.
-"""
-if porcentaje >= SEMAFORO_VERDE * 100:
-    return "VERDE"
-elif porcentaje >= SEMAFORO_AMARILLO * 100:
-    return "AMARILLO"
-else:
-    return "ROJO"
+    """
+    Calcula el estado del semáforo según el porcentaje de cobertura.
+    """
+    if porcentaje >= SEMAFORO_VERDE * 100:
+        return "VERDE"
+    elif porcentaje >= SEMAFORO_AMARILLO * 100:
+        return "AMARILLO"
+    else:
+        return "ROJO"
 
 
 # ============================================
@@ -150,24 +149,24 @@ else:
 
 @app.get("/")
 async def root():
-"""Endpoint de salud del servicio."""
-return {
-    "status": "ok",
-    "service": "WFSA BigQuery API",
-    "version": "1.0.0",
-    "environment": ENVIRONMENT,
-    "timestamp": datetime.now().isoformat()
-}
+    """Endpoint de salud del servicio."""
+    return {
+        "status": "ok",
+        "service": "WFSA BigQuery API",
+        "version": "1.0.0",
+        "environment": ENVIRONMENT,
+        "timestamp": datetime.now().isoformat()
+    }
 
 
 @app.get("/api/health")
 async def health_check():
-"""Health check para Cloud Run."""
-return {
-    "status": "healthy",
-    "environment": ENVIRONMENT,
-    "project_id": PROJECT_ID
-}
+    """Health check para Cloud Run."""
+    return {
+        "status": "healthy",
+        "environment": ENVIRONMENT,
+        "project_id": PROJECT_ID
+    }
 
 
 # ============================================
@@ -176,238 +175,238 @@ return {
 
 @app.get("/api/cobertura/instantanea/general")
 async def get_cobertura_general(user: dict = Depends(verify_firebase_token)):
-"""
-Obtiene el % de cobertura general del cliente (todos los turnos activos ahora).
-"""
-user_email = user["email"]
-
-try:
-    query = f"""
-    SELECT 
-      COUNT(*) as total_turnos_activos,
-      SUM(CASE WHEN asistencia = 1 THEN 1 ELSE 0 END) as turnos_cubiertos,
-      COUNT(*) - SUM(CASE WHEN asistencia = 1 THEN 1 ELSE 0 END) as turnos_descubiertos,
-      
-      -- Porcentaje general
-      ROUND(SAFE_DIVIDE(
-        SUM(CASE WHEN asistencia = 1 THEN 1 ELSE 0 END),
-        COUNT(*)
-      ) * 100, 2) as porcentaje_cobertura_general,
-      
-      -- Timestamp de actualización
-      MAX(hora_actual) as ultima_actualizacion
-
-    FROM `{TABLE_COBERTURA}` ci
-    WHERE ci.cliente_rol = (
-        SELECT cliente_rol 
-        FROM `{TABLE_USUARIOS}` 
-        WHERE email_login = @user_email
-        LIMIT 1
-      )
     """
+    Obtiene el % de cobertura general del cliente (todos los turnos activos ahora).
+    """
+    user_email = user["email"]
     
-    job_config = bigquery.QueryJobConfig(
-        query_parameters=[
-            bigquery.ScalarQueryParameter("user_email", "STRING", user_email)
-        ]
-    )
-    
-    query_job = bq_client.query(query, job_config=job_config)
-    results = list(query_job.result())
-    
-    if not results or results[0].total_turnos_activos == 0:
+    try:
+        query = f"""
+        SELECT 
+          COUNT(*) as total_turnos_activos,
+          SUM(CASE WHEN asistencia = 1 THEN 1 ELSE 0 END) as turnos_cubiertos,
+          COUNT(*) - SUM(CASE WHEN asistencia = 1 THEN 1 ELSE 0 END) as turnos_descubiertos,
+          
+          -- Porcentaje general
+          ROUND(SAFE_DIVIDE(
+            SUM(CASE WHEN asistencia = 1 THEN 1 ELSE 0 END),
+            COUNT(*)
+          ) * 100, 2) as porcentaje_cobertura_general,
+          
+          -- Timestamp de actualización
+          MAX(hora_actual) as ultima_actualizacion
+
+        FROM `{TABLE_COBERTURA}` ci
+        WHERE ci.cliente_rol = (
+            SELECT cliente_rol 
+            FROM `{TABLE_USUARIOS}` 
+            WHERE email_login = @user_email
+            LIMIT 1
+          )
+        """
+        
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("user_email", "STRING", user_email)
+            ]
+        )
+        
+        query_job = bq_client.query(query, job_config=job_config)
+        results = list(query_job.result())
+        
+        if not results or results[0].total_turnos_activos == 0:
+            return {
+                "total_turnos_activos": 0,
+                "turnos_cubiertos": 0,
+                "turnos_descubiertos": 0,
+                "porcentaje_cobertura_general": 0,
+                "estado_semaforo": "GRIS",
+                "ultima_actualizacion": None
+            }
+        
+        row = results[0]
+        porcentaje = float(row.porcentaje_cobertura_general) if row.porcentaje_cobertura_general else 0
+        
         return {
-            "total_turnos_activos": 0,
-            "turnos_cubiertos": 0,
-            "turnos_descubiertos": 0,
-            "porcentaje_cobertura_general": 0,
-            "estado_semaforo": "GRIS",
-            "ultima_actualizacion": None
+            "total_turnos_activos": row.total_turnos_activos,
+            "turnos_cubiertos": row.turnos_cubiertos,
+            "turnos_descubiertos": row.turnos_descubiertos,
+            "porcentaje_cobertura_general": porcentaje,
+            "estado_semaforo": calcular_estado_semaforo(porcentaje),
+            "ultima_actualizacion": row.ultima_actualizacion.isoformat() if row.ultima_actualizacion else None,
+            "proxima_actualizacion": (row.ultima_actualizacion + timedelta(minutes=5)).isoformat() if row.ultima_actualizacion else None
         }
-    
-    row = results[0]
-    porcentaje = float(row.porcentaje_cobertura_general) if row.porcentaje_cobertura_general else 0
-    
-    return {
-        "total_turnos_activos": row.total_turnos_activos,
-        "turnos_cubiertos": row.turnos_cubiertos,
-        "turnos_descubiertos": row.turnos_descubiertos,
-        "porcentaje_cobertura_general": porcentaje,
-        "estado_semaforo": calcular_estado_semaforo(porcentaje),
-        "ultima_actualizacion": row.ultima_actualizacion.isoformat() if row.ultima_actualizacion else None,
-        "proxima_actualizacion": (row.ultima_actualizacion + timedelta(minutes=5)).isoformat() if row.ultima_actualizacion else None
-    }
-    
-except Exception as e:
-    raise HTTPException(status_code=500, detail=f"Error al consultar BigQuery: {str(e)}")
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al consultar BigQuery: {str(e)}")
 
 
 @app.get("/api/cobertura/instantanea/por-instalacion")
 async def get_cobertura_por_instalacion(user: dict = Depends(verify_firebase_token)):
-"""
-Obtiene la cobertura instantánea por instalación con semáforo.
-"""
-user_email = user["email"]
-
-try:
-    query = f"""
-    SELECT 
-      ci.instalacion_rol,
-      ci.zona,
-      
-      -- Contadores
-      COUNT(*) as total_guardias_requeridos,
-      SUM(CASE WHEN ci.asistencia = 1 THEN 1 ELSE 0 END) as guardias_presentes,
-      COUNT(*) - SUM(CASE WHEN ci.asistencia = 1 THEN 1 ELSE 0 END) as guardias_ausentes,
-      
-      -- Porcentaje de cobertura
-      ROUND(SAFE_DIVIDE(
-        SUM(CASE WHEN ci.asistencia = 1 THEN 1 ELSE 0 END),
-        COUNT(*)
-      ) * 100, 2) as porcentaje_cobertura,
-      
-      -- Cantidad de turnos por estado COB
-      COUNTIF(ci.COB = 'CUBIERTO') as turnos_cubiertos,
-      COUNTIF(ci.COB = 'DESCUBIERTO') as turnos_descubiertos,
-      
-      -- Turnos activos
-      COUNT(DISTINCT ci.turno) as cantidad_turnos_activos
-
-    FROM `{TABLE_COBERTURA}` ci
-    INNER JOIN `{TABLE_USUARIO_INST}` ui 
-      ON ci.cliente_rol = ui.cliente_rol 
-      AND ci.instalacion_rol = ui.instalacion_rol
-    WHERE ui.email_login = @user_email
-      AND ui.puede_ver = TRUE
-    GROUP BY ci.instalacion_rol, ci.zona
-    ORDER BY guardias_ausentes DESC, porcentaje_cobertura ASC, ci.instalacion_rol
     """
+    Obtiene la cobertura instantánea por instalación con semáforo.
+    """
+    user_email = user["email"]
     
-    job_config = bigquery.QueryJobConfig(
-        query_parameters=[
-            bigquery.ScalarQueryParameter("user_email", "STRING", user_email)
-        ]
-    )
-    
-    query_job = bq_client.query(query, job_config=job_config)
-    results = query_job.result()
-    
-    instalaciones = []
-    for row in results:
-        porcentaje = float(row.porcentaje_cobertura) if row.porcentaje_cobertura else 0
+    try:
+        query = f"""
+        SELECT 
+          ci.instalacion_rol,
+          ci.zona,
+          
+          -- Contadores
+          COUNT(*) as total_guardias_requeridos,
+          SUM(CASE WHEN ci.asistencia = 1 THEN 1 ELSE 0 END) as guardias_presentes,
+          COUNT(*) - SUM(CASE WHEN ci.asistencia = 1 THEN 1 ELSE 0 END) as guardias_ausentes,
+          
+          -- Porcentaje de cobertura
+          ROUND(SAFE_DIVIDE(
+            SUM(CASE WHEN ci.asistencia = 1 THEN 1 ELSE 0 END),
+            COUNT(*)
+          ) * 100, 2) as porcentaje_cobertura,
+          
+          -- Cantidad de turnos por estado COB
+          COUNTIF(ci.COB = 'CUBIERTO') as turnos_cubiertos,
+          COUNTIF(ci.COB = 'DESCUBIERTO') as turnos_descubiertos,
+          
+          -- Turnos activos
+          COUNT(DISTINCT ci.turno) as cantidad_turnos_activos
+
+        FROM `{TABLE_COBERTURA}` ci
+        INNER JOIN `{TABLE_USUARIO_INST}` ui 
+          ON ci.cliente_rol = ui.cliente_rol 
+          AND ci.instalacion_rol = ui.instalacion_rol
+        WHERE ui.email_login = @user_email
+          AND ui.puede_ver = TRUE
+        GROUP BY ci.instalacion_rol, ci.zona
+        ORDER BY guardias_ausentes DESC, porcentaje_cobertura ASC, ci.instalacion_rol
+        """
         
-        instalaciones.append({
-            "instalacion_rol": row.instalacion_rol,
-            "zona": row.zona,
-            "total_guardias_requeridos": row.total_guardias_requeridos,
-            "guardias_presentes": row.guardias_presentes,
-            "guardias_ausentes": row.guardias_ausentes,
-            "porcentaje_cobertura": porcentaje,
-            "estado_semaforo": calcular_estado_semaforo(porcentaje),
-            "turnos_cubiertos": row.turnos_cubiertos,
-            "turnos_descubiertos": row.turnos_descubiertos,
-            "cantidad_turnos_activos": row.cantidad_turnos_activos
-        })
-    
-    return {
-        "total_instalaciones": len(instalaciones),
-        "instalaciones": instalaciones
-    }
-    
-except Exception as e:
-    raise HTTPException(status_code=500, detail=f"Error al consultar BigQuery: {str(e)}")
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("user_email", "STRING", user_email)
+            ]
+        )
+        
+        query_job = bq_client.query(query, job_config=job_config)
+        results = query_job.result()
+        
+        instalaciones = []
+        for row in results:
+            porcentaje = float(row.porcentaje_cobertura) if row.porcentaje_cobertura else 0
+            
+            instalaciones.append({
+                "instalacion_rol": row.instalacion_rol,
+                "zona": row.zona,
+                "total_guardias_requeridos": row.total_guardias_requeridos,
+                "guardias_presentes": row.guardias_presentes,
+                "guardias_ausentes": row.guardias_ausentes,
+                "porcentaje_cobertura": porcentaje,
+                "estado_semaforo": calcular_estado_semaforo(porcentaje),
+                "turnos_cubiertos": row.turnos_cubiertos,
+                "turnos_descubiertos": row.turnos_descubiertos,
+                "cantidad_turnos_activos": row.cantidad_turnos_activos
+            })
+        
+        return {
+            "total_instalaciones": len(instalaciones),
+            "instalaciones": instalaciones
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al consultar BigQuery: {str(e)}")
 
 
 @app.get("/api/cobertura/instantanea/detalle/{instalacion_rol}")
 async def get_detalle_instalacion(
-instalacion_rol: str,
-user: dict = Depends(verify_firebase_token)
+    instalacion_rol: str,
+    user: dict = Depends(verify_firebase_token)
 ):
-"""
-Obtiene el detalle de turnos de una instalación específica (para el pop-up).
-"""
-user_email = user["email"]
-
-try:
-    query = f"""
-    SELECT 
-      ci.turno as codigo_turno,
-      ci.cargo,
-      FORMAT_DATETIME('%H:%M', ci.her) as hora_entrada_planificada,
-      FORMAT_DATETIME('%H:%M', ci.hsr) as hora_salida_planificada,
-      
-      -- Información del guardia planificado
-      ci.rutrol as rut_planificado,
-      
-      -- Información del guardia que asistió
-      ci.rutasi as rut_asistente,
-      FORMAT_DATETIME('%H:%M', ci.entrada) as hora_entrada_real,
-      FORMAT_DATETIME('%H:%M', ci.salida) as hora_salida_real,
-      
-      -- Estado
-      ci.asistencia,
-      ci.COB as estado_cobertura,
-      ci.tvf as turno_extra,
-      ci.relevo,
-      ci.tipo,
-      ci.motivoppc as motivo_incumplimiento,
-      
-      -- Indicador de retraso (si asistió)
-      CASE 
-        WHEN ci.asistencia = 1 AND ci.entrada > ci.her THEN 
-          CONCAT('Retraso: ', CAST(DATETIME_DIFF(ci.entrada, ci.her, MINUTE) AS STRING), ' minutos')
-        WHEN ci.asistencia = 1 THEN 'A tiempo'
-        ELSE NULL
-      END as puntualidad
-
-    FROM `{TABLE_COBERTURA}` ci
-    INNER JOIN `{TABLE_USUARIO_INST}` ui 
-      ON ci.cliente_rol = ui.cliente_rol 
-      AND ci.instalacion_rol = ui.instalacion_rol
-    WHERE ui.email_login = @user_email
-      AND ui.puede_ver = TRUE
-      AND ci.instalacion_rol = @instalacion_rol
-    ORDER BY ci.turno, ci.her
     """
+    Obtiene el detalle de turnos de una instalación específica (para el pop-up).
+    """
+    user_email = user["email"]
     
-    job_config = bigquery.QueryJobConfig(
-        query_parameters=[
-            bigquery.ScalarQueryParameter("user_email", "STRING", user_email),
-            bigquery.ScalarQueryParameter("instalacion_rol", "STRING", instalacion_rol)
-        ]
-    )
-    
-    query_job = bq_client.query(query, job_config=job_config)
-    results = query_job.result()
-    
-    turnos = []
-    for row in results:
-        turnos.append({
-            "codigo_turno": row.codigo_turno,
-            "cargo": row.cargo,
-            "hora_entrada_planificada": row.hora_entrada_planificada,
-            "hora_salida_planificada": row.hora_salida_planificada,
-            "rut_planificado": row.rut_planificado,
-            "rut_asistente": row.rut_asistente,
-            "hora_entrada_real": row.hora_entrada_real,
-            "hora_salida_real": row.hora_salida_real,
-            "asistio": bool(row.asistencia),
-            "estado_cobertura": row.estado_cobertura,
-            "turno_extra": row.turno_extra,
-            "relevo": row.relevo,
-            "tipo": row.tipo,
-            "motivo_incumplimiento": row.motivo_incumplimiento,
-            "puntualidad": row.puntualidad
-        })
-    
-    return {
-        "instalacion": instalacion_rol,
-        "total_turnos": len(turnos),
-        "turnos": turnos
-    }
-    
-except Exception as e:
-    raise HTTPException(status_code=500, detail=f"Error al consultar BigQuery: {str(e)}")
+    try:
+        query = f"""
+        SELECT 
+          ci.turno as codigo_turno,
+          ci.cargo,
+          FORMAT_DATETIME('%H:%M', ci.her) as hora_entrada_planificada,
+          FORMAT_DATETIME('%H:%M', ci.hsr) as hora_salida_planificada,
+          
+          -- Información del guardia planificado
+          ci.rutrol as rut_planificado,
+          
+          -- Información del guardia que asistió
+          ci.rutasi as rut_asistente,
+          FORMAT_DATETIME('%H:%M', ci.entrada) as hora_entrada_real,
+          FORMAT_DATETIME('%H:%M', ci.salida) as hora_salida_real,
+          
+          -- Estado
+          ci.asistencia,
+          ci.COB as estado_cobertura,
+          ci.tvf as turno_extra,
+          ci.relevo,
+          ci.tipo,
+          ci.motivoppc as motivo_incumplimiento,
+          
+          -- Indicador de retraso (si asistió)
+          CASE 
+            WHEN ci.asistencia = 1 AND ci.entrada > ci.her THEN 
+              CONCAT('Retraso: ', CAST(DATETIME_DIFF(ci.entrada, ci.her, MINUTE) AS STRING), ' minutos')
+            WHEN ci.asistencia = 1 THEN 'A tiempo'
+            ELSE NULL
+          END as puntualidad
+
+        FROM `{TABLE_COBERTURA}` ci
+        INNER JOIN `{TABLE_USUARIO_INST}` ui 
+          ON ci.cliente_rol = ui.cliente_rol 
+          AND ci.instalacion_rol = ui.instalacion_rol
+        WHERE ui.email_login = @user_email
+          AND ui.puede_ver = TRUE
+          AND ci.instalacion_rol = @instalacion_rol
+        ORDER BY ci.turno, ci.her
+        """
+        
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("user_email", "STRING", user_email),
+                bigquery.ScalarQueryParameter("instalacion_rol", "STRING", instalacion_rol)
+            ]
+        )
+        
+        query_job = bq_client.query(query, job_config=job_config)
+        results = query_job.result()
+        
+        turnos = []
+        for row in results:
+            turnos.append({
+                "codigo_turno": row.codigo_turno,
+                "cargo": row.cargo,
+                "hora_entrada_planificada": row.hora_entrada_planificada,
+                "hora_salida_planificada": row.hora_salida_planificada,
+                "rut_planificado": row.rut_planificado,
+                "rut_asistente": row.rut_asistente,
+                "hora_entrada_real": row.hora_entrada_real,
+                "hora_salida_real": row.hora_salida_real,
+                "asistio": bool(row.asistencia),
+                "estado_cobertura": row.estado_cobertura,
+                "turno_extra": row.turno_extra,
+                "relevo": row.relevo,
+                "tipo": row.tipo,
+                "motivo_incumplimiento": row.motivo_incumplimiento,
+                "puntualidad": row.puntualidad
+            })
+        
+        return {
+            "instalacion": instalacion_rol,
+            "total_turnos": len(turnos),
+            "turnos": turnos
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al consultar BigQuery: {str(e)}")
 
 
 # ============================================
@@ -416,171 +415,179 @@ except Exception as e:
 
 @app.get("/api/cobertura/historico/semanal")
 async def get_cobertura_historica_semanal(
-dias: int = DIAS_HISTORICO_DEFAULT,
-user: dict = Depends(verify_firebase_token)
+    dias: int = DIAS_HISTORICO_DEFAULT,
+    user: dict = Depends(verify_firebase_token)
 ):
-"""
-Obtiene la cobertura histórica acumulada por semana (últimos N días).
-"""
-user_email = user["email"]
-
-try:
-    query = f"""
-    SELECT 
-      ah.semana,
-      ah.isoweek,
-      ah.ano,
-      CONCAT('Semana ', CAST(ah.isoweek AS STRING), ' - ', CAST(ah.ano AS STRING)) as periodo,
-      
-      SUM(ah.horas_planificadas) as horas_presupuestadas,
-      SUM(ah.horas_entregadas) as horas_entregadas,
-      SUM(ah.horas_planificadas) - SUM(ah.horas_entregadas) as horas_faltantes,
-      
-      ROUND(SAFE_DIVIDE(
-        SUM(ah.horas_entregadas),
-        SUM(ah.horas_planificadas)
-      ) * 100, 2) as porcentaje_cumplimiento,
-      
-      COUNT(*) as total_registros,
-      SUM(ah.asistencia) as total_asistencias,
-      COUNT(*) - SUM(ah.asistencia) as total_ausencias,
-      COUNT(DISTINCT ah.instalacion_rol) as num_instalaciones
-
-    FROM `{TABLE_HISTORICO}` ah
-    INNER JOIN `{TABLE_USUARIOS}` u ON ah.cliente_rol = u.cliente_rol
-    WHERE u.email_login = @user_email
-      AND ah.dia >= DATE_SUB(CURRENT_DATE(), INTERVAL @dias DAY)
-      AND ah.dia <= CURRENT_DATE()
-    GROUP BY ah.semana, ah.isoweek, ah.ano
-    ORDER BY ah.ano DESC, ah.isoweek DESC
     """
+    Obtiene la cobertura histórica acumulada por semana (últimos N días).
+    """
+    user_email = user["email"]
     
-    job_config = bigquery.QueryJobConfig(
-        query_parameters=[
-            bigquery.ScalarQueryParameter("user_email", "STRING", user_email),
-            bigquery.ScalarQueryParameter("dias", "INT64", dias)
-        ]
-    )
-    
-    query_job = bq_client.query(query, job_config=job_config)
-    results = query_job.result()
-    
-    semanas = []
-    for row in results:
-        porcentaje = float(row.porcentaje_cumplimiento) if row.porcentaje_cumplimiento else 0
+    try:
+        query = f"""
+        SELECT 
+          ah.semana,
+          ah.isoweek,
+          ah.ano,
+          MIN(ah.dia) as fecha_inicio,
+          MAX(ah.dia) as fecha_fin,
+          CONCAT(
+            FORMAT_DATE('%d/%m', MIN(ah.dia)),
+            ' - ',
+            FORMAT_DATE('%d/%m', MAX(ah.dia))
+          ) as periodo,
+          
+          SUM(ah.horas_planificadas) as horas_presupuestadas,
+          SUM(ah.horas_entregadas) as horas_entregadas,
+          SUM(ah.horas_planificadas) - SUM(ah.horas_entregadas) as horas_faltantes,
+          
+          ROUND(SAFE_DIVIDE(
+            SUM(ah.horas_entregadas),
+            SUM(ah.horas_planificadas)
+          ) * 100, 2) as porcentaje_cumplimiento,
+          
+          COUNT(*) as total_registros,
+          SUM(ah.asistencia) as total_asistencias,
+          COUNT(*) - SUM(ah.asistencia) as total_ausencias,
+          COUNT(DISTINCT ah.instalacion_rol) as num_instalaciones
+
+        FROM `{TABLE_HISTORICO}` ah
+        INNER JOIN `{TABLE_USUARIOS}` u ON ah.cliente_rol = u.cliente_rol
+        WHERE u.email_login = @user_email
+          AND ah.dia >= DATE_SUB(CURRENT_DATE(), INTERVAL @dias DAY)
+          AND ah.dia <= CURRENT_DATE()
+        GROUP BY ah.semana, ah.isoweek, ah.ano
+        ORDER BY ah.ano DESC, ah.isoweek DESC
+        """
         
-        semanas.append({
-            "semana": row.semana,
-            "isoweek": row.isoweek,
-            "ano": row.ano,
-            "periodo": row.periodo,
-            "horas_presupuestadas": float(row.horas_presupuestadas) if row.horas_presupuestadas else 0,
-            "horas_entregadas": float(row.horas_entregadas) if row.horas_entregadas else 0,
-            "horas_faltantes": float(row.horas_faltantes) if row.horas_faltantes else 0,
-            "porcentaje_cumplimiento": porcentaje,
-            "estado_semaforo": calcular_estado_semaforo(porcentaje),
-            "total_registros": row.total_registros,
-            "total_asistencias": row.total_asistencias,
-            "total_ausencias": row.total_ausencias,
-            "num_instalaciones": row.num_instalaciones
-        })
-    
-    return {
-        "dias_consultados": dias,
-        "total_semanas": len(semanas),
-        "semanas": semanas
-    }
-    
-except Exception as e:
-    raise HTTPException(status_code=500, detail=f"Error al consultar BigQuery: {str(e)}")
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("user_email", "STRING", user_email),
+                bigquery.ScalarQueryParameter("dias", "INT64", dias)
+            ]
+        )
+        
+        query_job = bq_client.query(query, job_config=job_config)
+        results = query_job.result()
+        
+        semanas = []
+        for row in results:
+            porcentaje = float(row.porcentaje_cumplimiento) if row.porcentaje_cumplimiento else 0
+            
+            semanas.append({
+                "semana": row.semana,
+                "isoweek": row.isoweek,
+                "ano": row.ano,
+                "fecha_inicio": row.fecha_inicio.isoformat() if row.fecha_inicio else None,
+                "fecha_fin": row.fecha_fin.isoformat() if row.fecha_fin else None,
+                "periodo": row.periodo,
+                "horas_presupuestadas": float(row.horas_presupuestadas) if row.horas_presupuestadas else 0,
+                "horas_entregadas": float(row.horas_entregadas) if row.horas_entregadas else 0,
+                "horas_faltantes": float(row.horas_faltantes) if row.horas_faltantes else 0,
+                "porcentaje_cumplimiento": porcentaje,
+                "estado_semaforo": calcular_estado_semaforo(porcentaje),
+                "total_registros": row.total_registros,
+                "total_asistencias": row.total_asistencias,
+                "total_ausencias": row.total_ausencias,
+                "num_instalaciones": row.num_instalaciones
+            })
+        
+        return {
+            "dias_consultados": dias,
+            "total_semanas": len(semanas),
+            "semanas": semanas
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al consultar BigQuery: {str(e)}")
 
 
 @app.get("/api/cobertura/historico/por-instalacion")
 async def get_cobertura_historica_por_instalacion(
-dias: int = DIAS_HISTORICO_DEFAULT,
-user: dict = Depends(verify_firebase_token)
+    dias: int = DIAS_HISTORICO_DEFAULT,
+    user: dict = Depends(verify_firebase_token)
 ):
-"""
-Obtiene la cobertura histórica por instalación y semana.
-"""
-user_email = user["email"]
-
-try:
-    query = f"""
-    SELECT 
-      ah.semana,
-      ah.isoweek,
-      ah.ano,
-      ah.instalacion_rol,
-      ah.zona,
-      
-      CONCAT('Semana ', CAST(ah.isoweek AS STRING), ' - ', CAST(ah.ano AS STRING)) as periodo,
-      
-      SUM(ah.horas_planificadas) as horas_presupuestadas,
-      SUM(ah.horas_entregadas) as horas_entregadas,
-      SUM(ah.horas_planificadas) - SUM(ah.horas_entregadas) as horas_faltantes,
-      
-      ROUND(SAFE_DIVIDE(
-        SUM(ah.horas_entregadas),
-        SUM(ah.horas_planificadas)
-      ) * 100, 2) as porcentaje_cumplimiento,
-      
-      COUNT(DISTINCT ah.rutrol) as guardias_planificados,
-      SUM(ah.asistencia) as asistencias_registradas,
-      
-      COUNTIF(ah.tvf IS NOT NULL AND ah.tvf != '') as cantidad_turnos_extra
-
-    FROM `{TABLE_HISTORICO}` ah
-    INNER JOIN `{TABLE_USUARIO_INST}` ui 
-      ON ah.cliente_rol = ui.cliente_rol 
-      AND ah.instalacion_rol = ui.instalacion_rol
-    WHERE ui.email_login = @user_email
-      AND ui.puede_ver = TRUE
-      AND ah.dia >= DATE_SUB(CURRENT_DATE(), INTERVAL @dias DAY)
-      AND ah.dia <= CURRENT_DATE()
-    GROUP BY ah.semana, ah.isoweek, ah.ano, ah.instalacion_rol, ah.zona
-    ORDER BY ah.ano DESC, ah.isoweek DESC, ah.instalacion_rol
     """
+    Obtiene la cobertura histórica por instalación y semana.
+    """
+    user_email = user["email"]
     
-    job_config = bigquery.QueryJobConfig(
-        query_parameters=[
-            bigquery.ScalarQueryParameter("user_email", "STRING", user_email),
-            bigquery.ScalarQueryParameter("dias", "INT64", dias)
-        ]
-    )
-    
-    query_job = bq_client.query(query, job_config=job_config)
-    results = query_job.result()
-    
-    datos = []
-    for row in results:
-        porcentaje = float(row.porcentaje_cumplimiento) if row.porcentaje_cumplimiento else 0
+    try:
+        query = f"""
+        SELECT 
+          ah.semana,
+          ah.isoweek,
+          ah.ano,
+          ah.instalacion_rol,
+          ah.zona,
+          
+          CONCAT('Semana ', CAST(ah.isoweek AS STRING), ' - ', CAST(ah.ano AS STRING)) as periodo,
+          
+          SUM(ah.horas_planificadas) as horas_presupuestadas,
+          SUM(ah.horas_entregadas) as horas_entregadas,
+          SUM(ah.horas_planificadas) - SUM(ah.horas_entregadas) as horas_faltantes,
+          
+          ROUND(SAFE_DIVIDE(
+            SUM(ah.horas_entregadas),
+            SUM(ah.horas_planificadas)
+          ) * 100, 2) as porcentaje_cumplimiento,
+          
+          COUNT(DISTINCT ah.rutrol) as guardias_planificados,
+          SUM(ah.asistencia) as asistencias_registradas,
+          
+          COUNTIF(ah.tvf IS NOT NULL AND ah.tvf != '') as cantidad_turnos_extra
+
+        FROM `{TABLE_HISTORICO}` ah
+        INNER JOIN `{TABLE_USUARIO_INST}` ui 
+          ON ah.cliente_rol = ui.cliente_rol 
+          AND ah.instalacion_rol = ui.instalacion_rol
+        WHERE ui.email_login = @user_email
+          AND ui.puede_ver = TRUE
+          AND ah.dia >= DATE_SUB(CURRENT_DATE(), INTERVAL @dias DAY)
+          AND ah.dia <= CURRENT_DATE()
+        GROUP BY ah.semana, ah.isoweek, ah.ano, ah.instalacion_rol, ah.zona
+        ORDER BY ah.ano DESC, ah.isoweek DESC, ah.instalacion_rol
+        """
         
-        datos.append({
-            "semana": row.semana,
-            "isoweek": row.isoweek,
-            "ano": row.ano,
-            "periodo": row.periodo,
-            "instalacion_rol": row.instalacion_rol,
-            "zona": row.zona,
-            "horas_presupuestadas": float(row.horas_presupuestadas) if row.horas_presupuestadas else 0,
-            "horas_entregadas": float(row.horas_entregadas) if row.horas_entregadas else 0,
-            "horas_faltantes": float(row.horas_faltantes) if row.horas_faltantes else 0,
-            "porcentaje_cumplimiento": porcentaje,
-            "estado_semaforo": calcular_estado_semaforo(porcentaje),
-            "guardias_planificados": row.guardias_planificados,
-            "asistencias_registradas": row.asistencias_registradas,
-            "cantidad_turnos_extra": row.cantidad_turnos_extra
-        })
-    
-    return {
-        "dias_consultados": dias,
-        "total_registros": len(datos),
-        "datos": datos
-    }
-    
-except Exception as e:
-    raise HTTPException(status_code=500, detail=f"Error al consultar BigQuery: {str(e)}")
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("user_email", "STRING", user_email),
+                bigquery.ScalarQueryParameter("dias", "INT64", dias)
+            ]
+        )
+        
+        query_job = bq_client.query(query, job_config=job_config)
+        results = query_job.result()
+        
+        datos = []
+        for row in results:
+            porcentaje = float(row.porcentaje_cumplimiento) if row.porcentaje_cumplimiento else 0
+            
+            datos.append({
+                "semana": row.semana,
+                "isoweek": row.isoweek,
+                "ano": row.ano,
+                "periodo": row.periodo,
+                "instalacion_rol": row.instalacion_rol,
+                "zona": row.zona,
+                "horas_presupuestadas": float(row.horas_presupuestadas) if row.horas_presupuestadas else 0,
+                "horas_entregadas": float(row.horas_entregadas) if row.horas_entregadas else 0,
+                "horas_faltantes": float(row.horas_faltantes) if row.horas_faltantes else 0,
+                "porcentaje_cumplimiento": porcentaje,
+                "estado_semaforo": calcular_estado_semaforo(porcentaje),
+                "guardias_planificados": row.guardias_planificados,
+                "asistencias_registradas": row.asistencias_registradas,
+                "cantidad_turnos_extra": row.cantidad_turnos_extra
+            })
+        
+        return {
+            "dias_consultados": dias,
+            "total_registros": len(datos),
+            "datos": datos
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al consultar BigQuery: {str(e)}")
 
 
 # ============================================
@@ -589,62 +596,62 @@ except Exception as e:
 
 @app.get("/api/contactos/{instalacion_rol}")
 async def get_contactos_instalacion(
-instalacion_rol: str,
-user: dict = Depends(verify_firebase_token)
+    instalacion_rol: str,
+    user: dict = Depends(verify_firebase_token)
 ):
-"""
-Obtiene los contactos de WhatsApp de una instalación.
-"""
-user_email = user["email"]
-
-try:
-    query = f"""
-    SELECT 
-      c.contacto_id,
-      c.nombre_contacto,
-      c.telefono,
-      c.cargo,
-      c.email
-    FROM `{TABLE_USUARIO_INST}` ui
-    INNER JOIN `{TABLE_INST_CONTACTO}` ic 
-      ON ui.cliente_rol = ic.cliente_rol 
-      AND ui.instalacion_rol = ic.instalacion_rol
-    INNER JOIN `{TABLE_CONTACTOS}` c ON ic.contacto_id = c.contacto_id
-    WHERE ui.email_login = @user_email
-      AND ui.puede_ver = TRUE
-      AND ui.instalacion_rol = @instalacion_rol
-      AND c.activo = TRUE
-    ORDER BY c.nombre_contacto
     """
+    Obtiene los contactos de WhatsApp de una instalación.
+    """
+    user_email = user["email"]
     
-    job_config = bigquery.QueryJobConfig(
-        query_parameters=[
-            bigquery.ScalarQueryParameter("user_email", "STRING", user_email),
-            bigquery.ScalarQueryParameter("instalacion_rol", "STRING", instalacion_rol)
-        ]
-    )
-    
-    query_job = bq_client.query(query, job_config=job_config)
-    results = query_job.result()
-    
-    contactos = []
-    for row in results:
-        contactos.append({
-            "contacto_id": row.contacto_id,
-            "nombre": row.nombre_contacto,
-            "telefono": row.telefono,
-            "cargo": row.cargo,
-            "email": row.email
-        })
-    
-    return {
-        "instalacion": instalacion_rol,
-        "total_contactos": len(contactos),
-        "contactos": contactos
-    }
-    
-except Exception as e:
-    raise HTTPException(status_code=500, detail=f"Error al consultar BigQuery: {str(e)}")
+    try:
+        query = f"""
+        SELECT 
+          c.contacto_id,
+          c.nombre_contacto,
+          c.telefono,
+          c.cargo,
+          c.email
+        FROM `{TABLE_USUARIO_INST}` ui
+        INNER JOIN `{TABLE_INST_CONTACTO}` ic 
+          ON ui.cliente_rol = ic.cliente_rol 
+          AND ui.instalacion_rol = ic.instalacion_rol
+        INNER JOIN `{TABLE_CONTACTOS}` c ON ic.contacto_id = c.contacto_id
+        WHERE ui.email_login = @user_email
+          AND ui.puede_ver = TRUE
+          AND ui.instalacion_rol = @instalacion_rol
+          AND c.activo = TRUE
+        ORDER BY c.nombre_contacto
+        """
+        
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("user_email", "STRING", user_email),
+                bigquery.ScalarQueryParameter("instalacion_rol", "STRING", instalacion_rol)
+            ]
+        )
+        
+        query_job = bq_client.query(query, job_config=job_config)
+        results = query_job.result()
+        
+        contactos = []
+        for row in results:
+            contactos.append({
+                "contacto_id": row.contacto_id,
+                "nombre": row.nombre_contacto,
+                "telefono": row.telefono,
+                "cargo": row.cargo,
+                "email": row.email
+            })
+        
+        return {
+            "instalacion": instalacion_rol,
+            "total_contactos": len(contactos),
+            "contactos": contactos
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al consultar BigQuery: {str(e)}")
 
 
 # ============================================
@@ -652,6 +659,6 @@ except Exception as e:
 # ============================================
 
 if __name__ == "__main__":
-import uvicorn
-port = int(os.getenv("PORT", 8080))
-uvicorn.run(app, host="0.0.0.0", port=port)
+    import uvicorn
+    port = int(os.getenv("PORT", 8080))
+    uvicorn.run(app, host="0.0.0.0", port=port)
