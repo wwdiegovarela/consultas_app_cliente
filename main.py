@@ -50,6 +50,7 @@ DATASET_APP = os.getenv("DATASET_APP", "app_clientes")
 TABLE_COBERTURA = f"{PROJECT_ID}.{DATASET_REPORTES}.cobertura_instantanea"
 TABLE_HISTORICO = f"{PROJECT_ID}.{DATASET_REPORTES}.cr_asistencia_hist_tb"
 TABLE_INSTALACIONES = f"{PROJECT_ID}.{DATASET_APP}.cr_info_instalaciones"
+TABLE_PPC = f"{PROJECT_ID}.cr_vistas_reporte.cr_ppc_dia"  # Puestos Por Cubrir
 
 # Tablas de gestión
 TABLE_USUARIOS = f"{PROJECT_ID}.{DATASET_APP}.usuarios_app"
@@ -713,6 +714,119 @@ async def get_cobertura_historica_por_instalacion(
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al consultar BigQuery: {str(e)}")
+
+
+# ============================================
+# ENDPOINTS - PUESTOS POR CUBRIR (PPC)
+# ============================================
+
+@app.get("/api/ppc/total")
+async def get_ppc_total(user: dict = Depends(verificar_permiso_cobertura)):
+    """
+    Obtiene el total de Puestos Por Cubrir (PPC) del cliente.
+    """
+    user_email = user["email"]
+    
+    try:
+        query = f"""
+        SELECT 
+          COUNT(*) as total_ppc
+        FROM `{TABLE_PPC}` ppc
+        WHERE ppc.nombrerol = (
+            SELECT cliente_rol 
+            FROM `{TABLE_USUARIOS}` 
+            WHERE email_login = @user_email
+            LIMIT 1
+          )
+        """
+        
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("user_email", "STRING", user_email)
+            ]
+        )
+        
+        query_job = bq_client.query(query, job_config=job_config)
+        results = list(query_job.result())
+        
+        if not results:
+            return {"total_ppc": 0}
+        
+        row = results[0]
+        
+        return {
+            "total_ppc": row.total_ppc
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al consultar PPC: {str(e)}")
+
+
+@app.get("/api/ppc/por-instalacion/{instalacion_rol}")
+async def get_ppc_por_instalacion(
+    instalacion_rol: str,
+    user: dict = Depends(verificar_permiso_cobertura)
+):
+    """
+    Obtiene los Puestos Por Cubrir (PPC) de una instalación específica,
+    agrupados por horario de turno (her - hsr).
+    """
+    user_email = user["email"]
+    
+    try:
+        query = f"""
+        SELECT 
+          ppc.turno,
+          FORMAT_DATETIME('%H:%M', ppc.her) as hora_entrada,
+          FORMAT_DATETIME('%H:%M', ppc.hsr) as hora_salida,
+          CONCAT(
+            FORMAT_DATETIME('%H:%M', ppc.her),
+            ' - ',
+            FORMAT_DATETIME('%H:%M', ppc.hsr)
+          ) as horario,
+          COUNT(*) as cantidad_ppc
+        FROM `{TABLE_PPC}` ppc
+        INNER JOIN `{TABLE_USUARIO_INST}` ui 
+          ON ppc.nombrerol = ui.cliente_rol 
+          AND ppc.instalacion_rol = ui.instalacion_rol
+        WHERE ui.email_login = @user_email
+          AND ui.puede_ver = TRUE
+          AND ppc.instalacion_rol = @instalacion_rol
+        GROUP BY ppc.turno, ppc.her, ppc.hsr
+        ORDER BY ppc.her, ppc.hsr
+        """
+        
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("user_email", "STRING", user_email),
+                bigquery.ScalarQueryParameter("instalacion_rol", "STRING", instalacion_rol)
+            ]
+        )
+        
+        query_job = bq_client.query(query, job_config=job_config)
+        results = query_job.result()
+        
+        ppc_por_turno = []
+        total_ppc = 0
+        
+        for row in results:
+            ppc_por_turno.append({
+                "turno": row.turno,
+                "hora_entrada": row.hora_entrada,
+                "hora_salida": row.hora_salida,
+                "horario": row.horario,
+                "cantidad_ppc": row.cantidad_ppc
+            })
+            total_ppc += row.cantidad_ppc
+        
+        return {
+            "instalacion": instalacion_rol,
+            "total_ppc": total_ppc,
+            "ppc_por_turno": ppc_por_turno
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al consultar PPC: {str(e)}")
 
 
 # ============================================
