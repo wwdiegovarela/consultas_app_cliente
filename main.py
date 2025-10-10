@@ -396,7 +396,14 @@ async def get_cobertura_por_instalacion(user: dict = Depends(verificar_permiso_c
           COUNTIF(ci.COB = 'DESCUBIERTO') as turnos_descubiertos,
           
           -- Turnos activos
-          COUNT(DISTINCT ci.turno) as cantidad_turnos_activos
+          COUNT(DISTINCT ci.turno) as cantidad_turnos_activos,
+          
+          -- PPC (Puestos Por Cubrir)
+          COALESCE((
+            SELECT COUNT(*)
+            FROM `{PROJECT_ID}.cr_vistas_reporte.cr_ppc_dia` ppc
+            WHERE ppc.instalacion_rol = ci.instalacion_rol
+          ), 0) as ppc
 
         FROM `{TABLE_COBERTURA}` ci
         INNER JOIN `{TABLE_USUARIO_INST}` ui 
@@ -431,7 +438,8 @@ async def get_cobertura_por_instalacion(user: dict = Depends(verificar_permiso_c
                 "estado_semaforo": calcular_estado_semaforo(porcentaje),
                 "turnos_cubiertos": row.turnos_cubiertos,
                 "turnos_descubiertos": row.turnos_descubiertos,
-                "cantidad_turnos_activos": row.cantidad_turnos_activos
+                "cantidad_turnos_activos": row.cantidad_turnos_activos,
+                "ppc": row.ppc
             })
         
         return {
@@ -783,10 +791,9 @@ async def get_ppc_por_instalacion(
             FORMAT_DATETIME('%H:%M', ppc.hsr)
           ) as horario,
           COUNT(*) as cantidad_ppc
-        FROM `{TABLE_PPC}` ppc
+        FROM `{PROJECT_ID}.cr_vistas_reporte.cr_ppc_dia` ppc
         INNER JOIN `{TABLE_USUARIO_INST}` ui 
-          ON ppc.nombrerol = ui.cliente_rol 
-          AND ppc.instalacion_rol = ui.instalacion_rol
+          ON ppc.instalacion_rol = ui.instalacion_rol
         WHERE ui.email_login = @user_email
           AND ui.puede_ver = TRUE
           AND ppc.instalacion_rol = @instalacion_rol
@@ -851,7 +858,8 @@ async def get_contactos_instalacion(
           c.email
         FROM `{TABLE_USUARIO_INST}` ui
         INNER JOIN `{TABLE_INST_CONTACTO}` ic 
-          ON ui.instalacion_rol = ic.instalacion_rol
+          ON ui.cliente_rol = ic.cliente_rol 
+          AND ui.instalacion_rol = ic.instalacion_rol
         INNER JOIN `{TABLE_CONTACTOS}` c ON ic.contacto_id = c.contacto_id
         WHERE ui.email_login = @user_email
           AND ui.puede_ver = TRUE
