@@ -463,6 +463,109 @@ async def get_cobertura_por_instalacion(user: dict = Depends(verificar_permiso_c
         raise HTTPException(status_code=500, detail=f"Error al consultar BigQuery: {str(e)}")
 
 
+@app.get("/api/cobertura/instantanea/detalle-todas")
+async def get_detalle_todas_instalaciones(
+    user: dict = Depends(verificar_permiso_cobertura)
+):
+    """
+    Obtiene el detalle de turnos de TODAS las instalaciones del usuario en una sola consulta.
+    Optimizado para precarga.
+    """
+    user_email = user["email"]
+    
+    try:
+        query = f"""
+        SELECT 
+          ci.instalacion_rol,
+          ci.turno as codigo_turno,
+          ci.cargo,
+          FORMAT_DATETIME('%H:%M', ci.her) as hora_entrada_planificada,
+          FORMAT_DATETIME('%H:%M', ci.hsr) as hora_salida_planificada,
+          
+          -- Información del guardia planificado
+          ci.rutrol as rut_planificado,
+          
+          -- Información del guardia que asistió
+          ci.rutasi as rut_asistente,
+          FORMAT_DATETIME('%H:%M', ci.entrada) as hora_entrada_real,
+          FORMAT_DATETIME('%H:%M', ci.salida) as hora_salida_real,
+          
+          -- Estado
+          ci.asistencia,
+          ci.COB as estado_cobertura,
+          ci.tvf as turno_extra,
+          ci.relevo,
+          ci.tipo,
+          ci.motivoppc as motivo_incumplimiento,
+          
+          -- Indicador de retraso (si asistió)
+          CASE 
+            WHEN ci.asistencia = 1 AND ci.entrada > ci.her THEN 
+              CONCAT('Retraso: ', CAST(DATETIME_DIFF(ci.entrada, ci.her, MINUTE) AS STRING), ' minutos')
+            WHEN ci.asistencia = 1 THEN 'A tiempo'
+            ELSE NULL
+          END as puntualidad
+
+        FROM `{TABLE_COBERTURA}` ci
+        INNER JOIN `{TABLE_USUARIO_INST}` ui 
+          ON ci.cliente_rol = ui.cliente_rol 
+          AND ci.instalacion_rol = ui.instalacion_rol
+        WHERE ui.email_login = @user_email
+          AND ui.puede_ver = TRUE
+        ORDER BY ci.instalacion_rol, ci.turno, ci.her
+        """
+        
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("user_email", "STRING", user_email)
+            ]
+        )
+        
+        query_job = bq_client.query(query, job_config=job_config)
+        results = query_job.result()
+        
+        # Agrupar por instalación
+        instalaciones_detalle = {}
+        for row in results:
+            instalacion = row.instalacion_rol
+            
+            if instalacion not in instalaciones_detalle:
+                instalaciones_detalle[instalacion] = {
+                    "instalacion": instalacion,
+                    "turnos": []
+                }
+            
+            instalaciones_detalle[instalacion]["turnos"].append({
+                "codigo_turno": row.codigo_turno,
+                "cargo": row.cargo,
+                "hora_entrada_planificada": row.hora_entrada_planificada,
+                "hora_salida_planificada": row.hora_salida_planificada,
+                "rut_planificado": row.rut_planificado,
+                "rut_asistente": row.rut_asistente,
+                "hora_entrada_real": row.hora_entrada_real,
+                "hora_salida_real": row.hora_salida_real,
+                "asistio": bool(row.asistencia),
+                "estado_cobertura": row.estado_cobertura,
+                "turno_extra": row.turno_extra,
+                "relevo": row.relevo,
+                "tipo": row.tipo,
+                "motivo_incumplimiento": row.motivo_incumplimiento,
+                "puntualidad": row.puntualidad
+            })
+        
+        # Agregar total_turnos a cada instalación
+        for detalle in instalaciones_detalle.values():
+            detalle["total_turnos"] = len(detalle["turnos"])
+        
+        return {
+            "total_instalaciones": len(instalaciones_detalle),
+            "instalaciones": list(instalaciones_detalle.values())
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al consultar BigQuery: {str(e)}")
+
+
 @app.get("/api/cobertura/instantanea/detalle/{instalacion_rol}")
 async def get_detalle_instalacion(
     instalacion_rol: str,
@@ -774,6 +877,77 @@ async def get_ppc_total(user: dict = Depends(verificar_permiso_cobertura)):
         
         return {
             "total_ppc": row.total_ppc
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al consultar PPC: {str(e)}")
+
+
+@app.get("/api/ppc/todas-instalaciones")
+async def get_ppc_todas_instalaciones(
+    user: dict = Depends(verificar_permiso_cobertura)
+):
+    """
+    Obtiene los Puestos Por Cubrir (PPC) de TODAS las instalaciones del usuario en una sola consulta.
+    Optimizado para precarga.
+    """
+    user_email = user["email"]
+    
+    try:
+        query = f"""
+        SELECT 
+          ppc.instalacion_rol,
+          ppc.turno,
+          FORMAT_DATETIME('%H:%M', ppc.her) as hora_entrada,
+          FORMAT_DATETIME('%H:%M', ppc.hsr) as hora_salida,
+          CONCAT(
+            FORMAT_DATETIME('%H:%M', ppc.her),
+            ' - ',
+            FORMAT_DATETIME('%H:%M', ppc.hsr)
+          ) as horario,
+          COUNT(*) as cantidad_ppc
+        FROM `{PROJECT_ID}.cr_vistas_reporte.cr_ppc_dia` ppc
+        INNER JOIN `{TABLE_USUARIO_INST}` ui 
+          ON ppc.instalacion_rol = ui.instalacion_rol
+        WHERE ui.email_login = @user_email
+          AND ui.puede_ver = TRUE
+        GROUP BY ppc.instalacion_rol, ppc.turno, ppc.her, ppc.hsr
+        ORDER BY ppc.instalacion_rol, ppc.her, ppc.hsr
+        """
+        
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("user_email", "STRING", user_email)
+            ]
+        )
+        
+        query_job = bq_client.query(query, job_config=job_config)
+        results = query_job.result()
+        
+        # Agrupar por instalación
+        instalaciones_ppc = {}
+        for row in results:
+            instalacion = row.instalacion_rol
+            
+            if instalacion not in instalaciones_ppc:
+                instalaciones_ppc[instalacion] = {
+                    "instalacion": instalacion,
+                    "total_ppc": 0,
+                    "ppc_por_turno": []
+                }
+            
+            instalaciones_ppc[instalacion]["ppc_por_turno"].append({
+                "turno": row.turno,
+                "hora_entrada": row.hora_entrada,
+                "hora_salida": row.hora_salida,
+                "horario": row.horario,
+                "cantidad_ppc": row.cantidad_ppc
+            })
+            instalaciones_ppc[instalacion]["total_ppc"] += row.cantidad_ppc
+        
+        return {
+            "total_instalaciones": len(instalaciones_ppc),
+            "instalaciones": list(instalaciones_ppc.values())
         }
         
     except Exception as e:
