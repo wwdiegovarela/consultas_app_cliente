@@ -320,7 +320,17 @@ async def get_cobertura_general(user: dict = Depends(verificar_permiso_cobertura
           ) * 100, 2) as porcentaje_cobertura_general,
           
           -- Timestamp de actualización
-          MAX(hora_actual) as ultima_actualizacion
+          MAX(hora_actual) as ultima_actualizacion,
+          
+          -- Total de PPC (Puestos Por Cubrir)
+          (
+            SELECT COUNT(*)
+            FROM `{PROJECT_ID}.cr_vistas_reporte.cr_ppc_dia` ppc
+            INNER JOIN `{TABLE_USUARIO_INST}` ui 
+              ON ppc.instalacion_rol = ui.instalacion_rol
+            WHERE ui.email_login = @user_email
+              AND ui.puede_ver = TRUE
+          ) as total_ppc
 
         FROM `{TABLE_COBERTURA}` ci
         WHERE ci.cliente_rol = (
@@ -347,7 +357,8 @@ async def get_cobertura_general(user: dict = Depends(verificar_permiso_cobertura
                 "turnos_descubiertos": 0,
                 "porcentaje_cobertura_general": 0,
                 "estado_semaforo": "GRIS",
-                "ultima_actualizacion": None
+                "ultima_actualizacion": None,
+                "total_ppc": 0
             }
         
         row = results[0]
@@ -360,7 +371,8 @@ async def get_cobertura_general(user: dict = Depends(verificar_permiso_cobertura
             "porcentaje_cobertura_general": porcentaje,
             "estado_semaforo": calcular_estado_semaforo(porcentaje),
             "ultima_actualizacion": row.ultima_actualizacion.isoformat() if row.ultima_actualizacion else None,
-            "proxima_actualizacion": (row.ultima_actualizacion + timedelta(minutes=5)).isoformat() if row.ultima_actualizacion else None
+            "proxima_actualizacion": (row.ultima_actualizacion + timedelta(minutes=5)).isoformat() if row.ultima_actualizacion else None,
+            "total_ppc": row.total_ppc if hasattr(row, 'total_ppc') else 0
         }
         
     except Exception as e:
