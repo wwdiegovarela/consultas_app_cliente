@@ -468,13 +468,14 @@ async def get_detalle_todas_instalaciones(
     user: dict = Depends(verificar_permiso_cobertura)
 ):
     """
-    Obtiene el detalle de turnos de TODAS las instalaciones del usuario en una sola consulta.
-    Optimizado para precarga.
+    Obtiene el detalle de turnos Y PPC de TODAS las instalaciones del usuario en una sola consulta.
+    Optimizado para precarga - ahora incluye PPC.
     """
     user_email = user["email"]
     
     try:
-        query = f"""
+        # Consulta 1: Detalle de turnos
+        query_turnos = f"""
         SELECT 
           ci.instalacion_rol,
           ci.turno as codigo_turno,
@@ -515,24 +516,54 @@ async def get_detalle_todas_instalaciones(
         ORDER BY ci.instalacion_rol, ci.turno, ci.her
         """
         
+        # Consulta 2: PPC por instalación
+        query_ppc = f"""
+        SELECT 
+          ppc.instalacion_rol,
+          ppc.turno,
+          FORMAT_DATETIME('%H:%M', ppc.her) as hora_entrada,
+          FORMAT_DATETIME('%H:%M', ppc.hsr) as hora_salida,
+          CONCAT(
+            FORMAT_DATETIME('%H:%M', ppc.her),
+            ' - ',
+            FORMAT_DATETIME('%H:%M', ppc.hsr)
+          ) as horario,
+          COUNT(*) as cantidad_ppc
+        FROM `{PROJECT_ID}.cr_vistas_reporte.cr_ppc_dia` ppc
+        INNER JOIN `{TABLE_USUARIO_INST}` ui 
+          ON ppc.instalacion_rol = ui.instalacion_rol
+        WHERE ui.email_login = @user_email
+          AND ui.puede_ver = TRUE
+        GROUP BY ppc.instalacion_rol, ppc.turno, ppc.her, ppc.hsr
+        ORDER BY ppc.instalacion_rol, ppc.her, ppc.hsr
+        """
+        
         job_config = bigquery.QueryJobConfig(
             query_parameters=[
                 bigquery.ScalarQueryParameter("user_email", "STRING", user_email)
             ]
         )
         
-        query_job = bq_client.query(query, job_config=job_config)
-        results = query_job.result()
+        # Ejecutar ambas consultas en paralelo
+        query_job_turnos = bq_client.query(query_turnos, job_config=job_config)
+        query_job_ppc = bq_client.query(query_ppc, job_config=job_config)
         
-        # Agrupar por instalación
+        results_turnos = list(query_job_turnos.result())
+        results_ppc_list = list(query_job_ppc.result())
+        
+        print(f"📊 Resultados: {len(results_turnos)} turnos, {len(results_ppc_list)} grupos de PPC")
+        
+        # Agrupar turnos por instalación
         instalaciones_detalle = {}
-        for row in results:
+        for row in results_turnos:
             instalacion = row.instalacion_rol
             
             if instalacion not in instalaciones_detalle:
                 instalaciones_detalle[instalacion] = {
                     "instalacion": instalacion,
-                    "turnos": []
+                    "turnos": [],
+                    "total_ppc": 0,
+                    "ppc_por_turno": []
                 }
             
             instalaciones_detalle[instalacion]["turnos"].append({
@@ -552,6 +583,31 @@ async def get_detalle_todas_instalaciones(
                 "motivo_incumplimiento": row.motivo_incumplimiento,
                 "puntualidad": row.puntualidad
             })
+        
+        # Agregar PPC por instalación
+        print(f"📊 Procesando PPC...")
+        for row in results_ppc_list:
+            instalacion = row.instalacion_rol
+            print(f"  🔸 PPC para {instalacion}: turno={row.turno}, cantidad={row.cantidad_ppc}")
+            
+            # Si la instalación no existe (no tiene turnos activos pero sí PPC), crearla
+            if instalacion not in instalaciones_detalle:
+                instalaciones_detalle[instalacion] = {
+                    "instalacion": instalacion,
+                    "turnos": [],
+                    "total_ppc": 0,
+                    "ppc_por_turno": []
+                }
+            
+            instalaciones_detalle[instalacion]["ppc_por_turno"].append({
+                "turno": row.turno,
+                "hora_entrada": row.hora_entrada,
+                "hora_salida": row.hora_salida,
+                "horario": row.horario,
+                "cantidad_ppc": row.cantidad_ppc
+            })
+            instalaciones_detalle[instalacion]["total_ppc"] += row.cantidad_ppc
+            print(f"  ✅ Total PPC acumulado para {instalacion}: {instalaciones_detalle[instalacion]['total_ppc']}")
         
         # Agregar total_turnos a cada instalación
         for detalle in instalaciones_detalle.values():
