@@ -521,6 +521,7 @@ async def get_detalle_todas_instalaciones(
         SELECT 
           ppc.instalacion_rol,
           ppc.turno,
+          ppc.jornada,
           FORMAT_DATETIME('%H:%M', ppc.her) as hora_entrada,
           FORMAT_DATETIME('%H:%M', ppc.hsr) as hora_salida,
           CONCAT(
@@ -534,7 +535,7 @@ async def get_detalle_todas_instalaciones(
           ON ppc.instalacion_rol = ui.instalacion_rol
         WHERE ui.email_login = @user_email
           AND ui.puede_ver = TRUE
-        GROUP BY ppc.instalacion_rol, ppc.turno, ppc.her, ppc.hsr
+        GROUP BY ppc.instalacion_rol, ppc.turno, ppc.jornada, ppc.her, ppc.hsr
         ORDER BY ppc.instalacion_rol, ppc.her, ppc.hsr
         """
         
@@ -601,6 +602,7 @@ async def get_detalle_todas_instalaciones(
             
             instalaciones_detalle[instalacion]["ppc_por_turno"].append({
                 "turno": row.turno,
+                "jornada": row.jornada,
                 "hora_entrada": row.hora_entrada,
                 "hora_salida": row.hora_salida,
                 "horario": row.horario,
