@@ -310,35 +310,34 @@ async def get_cobertura_general(user: dict = Depends(verificar_permiso_cobertura
         query = f"""
         SELECT 
           COUNT(*) as total_turnos_activos,
-          SUM(CASE WHEN asistencia = 1 THEN 1 ELSE 0 END) as turnos_cubiertos,
-          COUNT(*) - SUM(CASE WHEN asistencia = 1 THEN 1 ELSE 0 END) as turnos_descubiertos,
+          SUM(CASE WHEN ci.asistencia = 1 THEN 1 ELSE 0 END) as turnos_cubiertos,
+          COUNT(*) - SUM(CASE WHEN ci.asistencia = 1 THEN 1 ELSE 0 END) as turnos_descubiertos,
           
           -- Porcentaje general
           ROUND(SAFE_DIVIDE(
-            SUM(CASE WHEN asistencia = 1 THEN 1 ELSE 0 END),
+            SUM(CASE WHEN ci.asistencia = 1 THEN 1 ELSE 0 END),
             COUNT(*)
           ) * 100, 2) as porcentaje_cobertura_general,
           
           -- Timestamp de actualización
-          MAX(hora_actual) as ultima_actualizacion,
+          MAX(ci.hora_actual) as ultima_actualizacion,
           
           -- Total de PPC (Puestos Por Cubrir)
           (
             SELECT COUNT(*)
             FROM `{PROJECT_ID}.cr_vistas_reporte.cr_ppc_dia` ppc
-            INNER JOIN `{TABLE_USUARIO_INST}` ui 
-              ON ppc.instalacion_rol = ui.instalacion_rol
-            WHERE ui.email_login = @user_email
-              AND ui.puede_ver = TRUE
+            INNER JOIN `{TABLE_USUARIO_INST}` ui2 
+              ON ppc.instalacion_rol = ui2.instalacion_rol
+            WHERE ui2.email_login = @user_email
+              AND ui2.puede_ver = TRUE
           ) as total_ppc
 
         FROM `{TABLE_COBERTURA}` ci
-        WHERE ci.cliente_rol = (
-            SELECT cliente_rol 
-            FROM `{TABLE_USUARIOS}` 
-            WHERE email_login = @user_email
-            LIMIT 1
-          )
+        INNER JOIN `{TABLE_USUARIO_INST}` ui 
+          ON ci.cliente_rol = ui.cliente_rol 
+          AND ci.instalacion_rol = ui.instalacion_rol
+        WHERE ui.email_login = @user_email
+          AND ui.puede_ver = TRUE
         """
         
         job_config = bigquery.QueryJobConfig(
