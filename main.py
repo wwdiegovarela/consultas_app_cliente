@@ -1373,44 +1373,48 @@ async def obtener_mis_encuestas(user_data: dict = Depends(verify_firebase_token)
         rol = user_data["rol_id"]
         
         # Determinar si es usuario WFSA (puede ver todas las encuestas individuales)
-        es_wfsa = rol in ['ADMIN_WFSA', 'SUBGERENTE_JEFE_WFSA', 'SUPERVISOR_WFSA']
+        es_wfsa = rol in ['ADMIN_WFSA', 'SUBGERENTE_WFSA', 'JEFE_WFSA', 'SUPERVISOR_WFSA']
         
-        # Calcular los últimos 3 períodos basado en la lógica:
-        # - Encuesta de octubre (2024-10) evalúa septiembre (2024-09)
-        # - Encuesta de noviembre (2024-11) evalúa octubre (2024-10)
-        # - Encuesta de diciembre (2024-12) evalúa noviembre (2024-11)
+        # Calcular períodos válidos basado en la nueva lógica:
+        # - Las encuestas se generan cada 2 meses (meses pares: 2,4,6,8,10,12)
+        # - Solo mostrar período en curso y período anterior
+        # - Ejemplo: Si estamos en enero 2025, mostramos diciembre 2024 y octubre 2024
         
-        # Obtener período actual (formato YYYYMM)
         from datetime import datetime
         ahora = datetime.now()
-        periodo_actual = ahora.strftime('%Y%m')
+        year_actual = ahora.year
+        month_actual = ahora.month
         
-        # Calcular los 3 períodos más recientes
-        # Si estamos en enero 2025 (202501), los últimos 3 períodos serían:
-        # - 202501 (enero) - evalúa diciembre 2024
-        # - 202412 (diciembre) - evalúa noviembre 2024  
-        # - 202411 (noviembre) - evalúa octubre 2024
-        periodos_validos = []
-        for i in range(3):
-            # Restar i meses al período actual
-            year = int(periodo_actual[:4])
-            month = int(periodo_actual[4:6])
-            
-            # Calcular mes anterior
-            if month == 1:
-                month = 12
-                year -= 1
+        # Encontrar el último mes par (período en curso)
+        if month_actual % 2 == 0:  # Mes actual es par
+            periodo_en_curso = f"{year_actual:04d}{month_actual:02d}"
+            # Período anterior: restar 2 meses
+            if month_actual == 2:
+                periodo_anterior = f"{year_actual-1:04d}12"  # Diciembre del año anterior
             else:
-                month -= 1
-            
-            periodo = f"{year:04d}{month:02d}"
-            periodos_validos.append(periodo)
+                periodo_anterior = f"{year_actual:04d}{month_actual-2:02d}"
+        else:  # Mes actual es impar
+            # Buscar el último mes par
+            if month_actual == 1:
+                periodo_en_curso = f"{year_actual-1:04d}12"  # Diciembre anterior
+                periodo_anterior = f"{year_actual-1:04d}10"  # Octubre anterior
+            else:
+                mes_par_anterior = month_actual - 1
+                periodo_en_curso = f"{year_actual:04d}{mes_par_anterior:02d}"
+                # Período anterior: restar 2 meses más
+                if mes_par_anterior == 2:
+                    periodo_anterior = f"{year_actual-1:04d}12"
+                else:
+                    periodo_anterior = f"{year_actual:04d}{mes_par_anterior-2:02d}"
+        
+        periodos_validos = [periodo_en_curso, periodo_anterior]
         
         # Crear condición IN para los períodos
         periodos_condition = "', '".join(periodos_validos)
         
-        # Debug: mostrar períodos calculados
-        print(f"🔍 Períodos válidos para mostrar: {periodos_validos}")
+        # Debug: mostrar períodos calculados (bimestral - solo meses pares)
+        print(f"🔍 Períodos válidos (bimestral): {periodos_validos}")
+        print(f"📅 Período en curso: {periodo_en_curso}, Período anterior: {periodo_anterior}")
         
         # Query para obtener encuestas del usuario
         if es_wfsa:
@@ -1803,7 +1807,8 @@ async def responder_encuesta(
         """
         
         # Determinar tipo de respuesta (cliente o WFSA que respondió por cliente)
-        tipo_respuesta = 'cliente' if user_data["rol_id"] == 'CLIENTE' else 'wfsa'
+        rol_usuario = user_data["rol_id"]
+        tipo_respuesta = 'cliente' if rol_usuario == 'CLIENTE' else 'wfsa'
         
         job_config_update = bigquery.QueryJobConfig(
             query_parameters=[
