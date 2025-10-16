@@ -1740,7 +1740,7 @@ async def responder_encuesta(
                 "pregunta_id": resp.get("pregunta_id"),
                 "respuesta_valor": resp.get("respuesta_valor"),  # Para escala 1-5 o texto libre
                 "comentario_adicional": resp.get("comentario"),
-                "fecha_respuesta": ahora
+                "fecha_respuesta": ahora.isoformat()  # Convertir a string ISO format
             }
             respuestas_para_insertar.append(respuesta_data)
         
