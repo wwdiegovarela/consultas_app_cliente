@@ -1370,7 +1370,7 @@ async def obtener_mis_encuestas(user_data: dict = Depends(verify_firebase_token)
     """
     try:
         user_email = user_data["email"]
-        rol = user_data["permisos"]["rol"]
+        rol = user_data["rol_id"]
         
         # Determinar si es usuario WFSA (puede ver todas las encuestas individuales)
         es_wfsa = rol in ['ADMIN_WFSA', 'SUBGERENTE_JEFE_WFSA', 'SUPERVISOR_WFSA']
@@ -1764,7 +1764,7 @@ async def responder_encuesta(
         """
         
         # Determinar tipo de respuesta (cliente o WFSA que respondió por cliente)
-        tipo_respuesta = 'cliente' if user_data["permisos"]["rol"] == 'CLIENTE' else 'wfsa'
+        tipo_respuesta = 'cliente' if user_data["rol_id"] == 'CLIENTE' else 'wfsa'
         
         job_config_update = bigquery.QueryJobConfig(
             query_parameters=[
@@ -1805,7 +1805,7 @@ async def ver_respuestas_encuesta(
     """
     try:
         user_email = user_data["email"]
-        rol = user_data["permisos"]["rol"]
+        rol = user_data["rol_id"]
         es_wfsa = rol in ['ADMIN_WFSA', 'SUBGERENTE_JEFE_WFSA', 'SUPERVISOR_WFSA']
         
         # Obtener encuesta
