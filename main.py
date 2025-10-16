@@ -1714,7 +1714,9 @@ async def responder_encuesta(
             )
         
         # Validación 3: Encuesta vencida
-        if encuesta.fecha_limite < datetime.now():
+        from datetime import datetime, timezone
+        ahora_utc = datetime.now(timezone.utc)
+        if encuesta.fecha_limite < ahora_utc:
             raise HTTPException(
                 status_code=400,
                 detail="Esta encuesta ya expiró"
@@ -1728,7 +1730,7 @@ async def responder_encuesta(
             )
         
         # Preparar respuestas para insertar
-        ahora = datetime.now()
+        ahora = datetime.now(timezone.utc)
         respuestas_para_insertar = []
         
         for resp in request.respuestas:
