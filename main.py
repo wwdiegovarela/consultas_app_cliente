@@ -1957,7 +1957,7 @@ async def update_fcm_token(
         
         # Actualizar token en BigQuery
         query = f"""
-        UPDATE `{TABLE_USUARIOS_APP}`
+        UPDATE `{TABLE_USUARIOS}`
         SET 
             fcm_token = @fcm_token,
             fecha_actualizacion = CURRENT_TIMESTAMP()
