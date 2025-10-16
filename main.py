@@ -1375,6 +1375,43 @@ async def obtener_mis_encuestas(user_data: dict = Depends(verify_firebase_token)
         # Determinar si es usuario WFSA (puede ver todas las encuestas individuales)
         es_wfsa = rol in ['ADMIN_WFSA', 'SUBGERENTE_JEFE_WFSA', 'SUPERVISOR_WFSA']
         
+        # Calcular los últimos 3 períodos basado en la lógica:
+        # - Encuesta de octubre (2024-10) evalúa septiembre (2024-09)
+        # - Encuesta de noviembre (2024-11) evalúa octubre (2024-10)
+        # - Encuesta de diciembre (2024-12) evalúa noviembre (2024-11)
+        
+        # Obtener período actual (formato YYYYMM)
+        from datetime import datetime
+        ahora = datetime.now()
+        periodo_actual = ahora.strftime('%Y%m')
+        
+        # Calcular los 3 períodos más recientes
+        # Si estamos en enero 2025 (202501), los últimos 3 períodos serían:
+        # - 202501 (enero) - evalúa diciembre 2024
+        # - 202412 (diciembre) - evalúa noviembre 2024  
+        # - 202411 (noviembre) - evalúa octubre 2024
+        periodos_validos = []
+        for i in range(3):
+            # Restar i meses al período actual
+            year = int(periodo_actual[:4])
+            month = int(periodo_actual[4:6])
+            
+            # Calcular mes anterior
+            if month == 1:
+                month = 12
+                year -= 1
+            else:
+                month -= 1
+            
+            periodo = f"{year:04d}{month:02d}"
+            periodos_validos.append(periodo)
+        
+        # Crear condición IN para los períodos
+        periodos_condition = "', '".join(periodos_validos)
+        
+        # Debug: mostrar períodos calculados
+        print(f"🔍 Períodos válidos para mostrar: {periodos_validos}")
+        
         # Query para obtener encuestas del usuario
         if es_wfsa:
             # WFSA: Ver todas las encuestas de sus instalaciones
@@ -1403,7 +1440,7 @@ async def obtener_mis_encuestas(user_data: dict = Depends(verify_firebase_token)
             INNER JOIN mis_instalaciones mi
                 ON s.cliente_rol = mi.cliente_rol
                 AND s.instalacion_rol = mi.instalacion_rol
-            WHERE s.fecha_limite >= CURRENT_TIMESTAMP()
+            WHERE s.periodo IN ('{periodos_condition}')
             ORDER BY s.instalacion_rol, s.modo, s.fecha_creacion DESC
             """
         else:
@@ -1433,7 +1470,7 @@ async def obtener_mis_encuestas(user_data: dict = Depends(verify_firebase_token)
             INNER JOIN mis_instalaciones mi
                 ON s.cliente_rol = mi.cliente_rol
                 AND s.instalacion_rol = mi.instalacion_rol
-            WHERE s.fecha_limite >= CURRENT_TIMESTAMP()
+            WHERE s.periodo IN ('{periodos_condition}')
               AND (
                   s.modo = 'compartida'
                   OR (s.modo = 'individual' AND s.email_destinatario = @user_email)
