@@ -1960,7 +1960,7 @@ async def update_fcm_token(
         UPDATE `{TABLE_USUARIOS}`
         SET 
             fcm_token = @fcm_token,
-            fecha_actualizacion = CURRENT_TIMESTAMP()
+            ultima_sesion = CURRENT_TIMESTAMP()
         WHERE email_login = @email_login
         """
         
