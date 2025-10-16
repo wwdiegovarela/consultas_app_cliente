@@ -62,6 +62,14 @@ TABLE_AUDITORIA = f"{PROJECT_ID}.{DATASET_APP}.auditoria"
 TABLE_ROLES = f"{PROJECT_ID}.{DATASET_APP}.roles"
 TABLE_USUARIO_CONTACTOS = f"{PROJECT_ID}.{DATASET_APP}.usuario_contactos"
 
+# Tablas de Encuestas
+TABLE_ENCUESTAS_CONFIG = f"{PROJECT_ID}.{DATASET_APP}.encuestas_configuracion"
+TABLE_ENCUESTAS_PREGUNTAS = f"{PROJECT_ID}.{DATASET_APP}.encuestas_preguntas"
+TABLE_ENCUESTAS_SOLICITUDES = f"{PROJECT_ID}.{DATASET_APP}.encuestas_solicitudes"
+TABLE_ENCUESTAS_RESPUESTAS = f"{PROJECT_ID}.{DATASET_APP}.encuestas_respuestas"
+TABLE_ENCUESTAS_NOTIF_PROG = f"{PROJECT_ID}.{DATASET_APP}.encuestas_notificaciones_programadas"
+TABLE_ENCUESTAS_NOTIF_LOG = f"{PROJECT_ID}.{DATASET_APP}.encuestas_notificaciones_log"
+
 # Configuración de semáforos (pueden ser variables de entorno)
 SEMAFORO_VERDE = float(os.getenv("SEMAFORO_VERDE", "0.95"))     # 95% o más
 SEMAFORO_AMARILLO = float(os.getenv("SEMAFORO_AMARILLO", "0.80")) # 80% a 94%
@@ -99,6 +107,10 @@ class ContactoCreate(BaseModel):
 class EnviarMensajeRequest(BaseModel):
     instalaciones: List[str]
     mensaje: str
+
+
+class RespuestaEncuestaRequest(BaseModel):
+    respuestas: List[Dict[str, Any]]  # [{"pregunta_id": "P001", "respuesta_valor": "5", "comentario": "..."}]
 
 
 # ============================================
@@ -1325,6 +1337,556 @@ async def get_mensajes_recibidos(user: dict = Depends(verify_firebase_token)):
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al obtener mensajes: {str(e)}")
+
+
+# ============================================
+# ENDPOINTS - ENCUESTAS
+# ============================================
+
+@app.get("/api/encuestas/mis-encuestas")
+async def obtener_mis_encuestas(user_data: dict = Depends(verify_firebase_token)):
+    """
+    Obtiene todas las encuestas del usuario agrupadas por instalación.
+    
+    Reglas:
+    - CLIENTE: Ve encuestas compartidas + sus encuestas individuales
+    - WFSA: Ve todas las encuestas (compartidas + individuales de todos)
+    
+    Retorna:
+    {
+        "instalaciones": [
+            {
+                "cliente_rol": "INACAP",
+                "instalacion_rol": "INACAP MAIPU",
+                "instalacion_nombre": "INACAP MAIPU",
+                "total_encuestas": 3,
+                "respondidas": 2,
+                "pendientes": 1,
+                "fecha_vencimiento_proxima": "2024-10-15T23:59:59",
+                "encuestas": [...]
+            }
+        ]
+    }
+    """
+    try:
+        user_email = user_data["email"]
+        rol = user_data["permisos"]["rol"]
+        
+        # Determinar si es usuario WFSA (puede ver todas las encuestas individuales)
+        es_wfsa = rol in ['ADMIN_WFSA', 'SUBGERENTE_JEFE_WFSA', 'SUPERVISOR_WFSA']
+        
+        # Query para obtener encuestas del usuario
+        if es_wfsa:
+            # WFSA: Ver todas las encuestas de sus instalaciones
+            query = f"""
+            WITH mis_instalaciones AS (
+                SELECT DISTINCT cliente_rol, instalacion_rol
+                FROM `{TABLE_USUARIO_INST}`
+                WHERE email_login = @user_email
+                  AND puede_ver = TRUE
+            )
+            SELECT 
+                s.encuesta_id,
+                s.periodo,
+                s.cliente_rol,
+                s.instalacion_rol,
+                s.modo,
+                s.email_destinatario,
+                s.estado,
+                s.fecha_creacion,
+                s.fecha_limite,
+                s.respondido_por_email,
+                s.respondido_por_nombre,
+                s.tipo_respuesta,
+                s.fecha_respuesta
+            FROM `{TABLE_ENCUESTAS_SOLICITUDES}` s
+            INNER JOIN mis_instalaciones mi
+                ON s.cliente_rol = mi.cliente_rol
+                AND s.instalacion_rol = mi.instalacion_rol
+            WHERE s.fecha_limite >= CURRENT_TIMESTAMP()
+            ORDER BY s.instalacion_rol, s.modo, s.fecha_creacion DESC
+            """
+        else:
+            # CLIENTE: Solo encuestas compartidas + sus individuales
+            query = f"""
+            WITH mis_instalaciones AS (
+                SELECT DISTINCT cliente_rol, instalacion_rol
+                FROM `{TABLE_USUARIO_INST}`
+                WHERE email_login = @user_email
+                  AND puede_ver = TRUE
+            )
+            SELECT 
+                s.encuesta_id,
+                s.periodo,
+                s.cliente_rol,
+                s.instalacion_rol,
+                s.modo,
+                s.email_destinatario,
+                s.estado,
+                s.fecha_creacion,
+                s.fecha_limite,
+                s.respondido_por_email,
+                s.respondido_por_nombre,
+                s.tipo_respuesta,
+                s.fecha_respuesta
+            FROM `{TABLE_ENCUESTAS_SOLICITUDES}` s
+            INNER JOIN mis_instalaciones mi
+                ON s.cliente_rol = mi.cliente_rol
+                AND s.instalacion_rol = mi.instalacion_rol
+            WHERE s.fecha_limite >= CURRENT_TIMESTAMP()
+              AND (
+                  s.modo = 'compartida'
+                  OR (s.modo = 'individual' AND s.email_destinatario = @user_email)
+              )
+            ORDER BY s.instalacion_rol, s.modo, s.fecha_creacion DESC
+            """
+        
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("user_email", "STRING", user_email),
+            ]
+        )
+        
+        results = list(bq_client.query(query, job_config=job_config).result())
+        
+        # Agrupar por instalación
+        instalaciones_dict = {}
+        
+        for row in results:
+            inst_key = row.instalacion_rol
+            
+            # Inicializar instalación si no existe
+            if inst_key not in instalaciones_dict:
+                instalaciones_dict[inst_key] = {
+                    "cliente_rol": row.cliente_rol,
+                    "instalacion_rol": row.instalacion_rol,
+                    "instalacion_nombre": row.instalacion_rol,
+                    "total_encuestas": 0,
+                    "respondidas": 0,
+                    "pendientes": 0,
+                    "fecha_vencimiento_proxima": None,
+                    "encuestas": []
+                }
+            
+            # Determinar permisos del usuario sobre esta encuesta
+            puede_responder = False
+            puede_ver_respuestas = False
+            
+            if row.estado == 'pendiente':
+                if row.modo == 'compartida':
+                    # Cualquiera puede responder encuestas compartidas pendientes
+                    puede_responder = True
+                elif row.modo == 'individual':
+                    # Solo el destinatario puede responder encuestas individuales
+                    puede_responder = (row.email_destinatario == user_email)
+                
+                # Actualizar fecha de vencimiento más próxima
+                if (instalaciones_dict[inst_key]["fecha_vencimiento_proxima"] is None or
+                    row.fecha_limite < instalaciones_dict[inst_key]["fecha_vencimiento_proxima"]):
+                    instalaciones_dict[inst_key]["fecha_vencimiento_proxima"] = row.fecha_limite
+            
+            if row.estado == 'completada':
+                # Puede ver respuestas si:
+                # - Es su encuesta individual
+                # - Es encuesta compartida de su instalación
+                # - Es usuario WFSA
+                if es_wfsa:
+                    puede_ver_respuestas = True
+                elif row.modo == 'compartida':
+                    puede_ver_respuestas = True
+                elif row.modo == 'individual' and row.email_destinatario == user_email:
+                    puede_ver_respuestas = True
+            
+            # Agregar encuesta
+            encuesta_data = {
+                "encuesta_id": row.encuesta_id,
+                "periodo": row.periodo,
+                "modo": row.modo,
+                "estado": row.estado,
+                "email_destinatario": row.email_destinatario,
+                "fecha_creacion": row.fecha_creacion.isoformat() if row.fecha_creacion else None,
+                "fecha_limite": row.fecha_limite.isoformat() if row.fecha_limite else None,
+                "respondido_por_email": row.respondido_por_email,
+                "respondido_por_nombre": row.respondido_por_nombre,
+                "tipo_respuesta": row.tipo_respuesta,
+                "fecha_respuesta": row.fecha_respuesta.isoformat() if row.fecha_respuesta else None,
+                "puede_responder": puede_responder,
+                "puede_ver_respuestas": puede_ver_respuestas
+            }
+            
+            instalaciones_dict[inst_key]["encuestas"].append(encuesta_data)
+            instalaciones_dict[inst_key]["total_encuestas"] += 1
+            
+            if row.estado == 'completada':
+                instalaciones_dict[inst_key]["respondidas"] += 1
+            elif row.estado == 'pendiente':
+                instalaciones_dict[inst_key]["pendientes"] += 1
+        
+        # Convertir a lista y formatear fechas
+        instalaciones_list = []
+        for inst in instalaciones_dict.values():
+            if inst["fecha_vencimiento_proxima"]:
+                inst["fecha_vencimiento_proxima"] = inst["fecha_vencimiento_proxima"].isoformat()
+            instalaciones_list.append(inst)
+        
+        return {
+            "success": True,
+            "instalaciones": instalaciones_list
+        }
+        
+    except Exception as e:
+        print(f"❌ Error obteniendo encuestas: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener encuestas: {str(e)}")
+
+
+@app.get("/api/encuestas/{encuesta_id}/preguntas")
+async def obtener_preguntas_encuesta(
+    encuesta_id: str,
+    user_data: dict = Depends(verify_firebase_token)
+):
+    """
+    Obtiene las preguntas de una encuesta específica.
+    
+    Retorna:
+    {
+        "encuesta": {...},
+        "preguntas": [
+            {
+                "pregunta_id": "P001",
+                "orden": 1,
+                "texto_pregunta": "¿Cómo considera...",
+                "tipo_respuesta": "escala_1_5",
+                "requiere_comentario": true,
+                "obligatoria": true
+            }
+        ]
+    }
+    """
+    try:
+        user_email = user_data["email"]
+        
+        # Verificar que el usuario tenga acceso a esta encuesta
+        query_encuesta = f"""
+        SELECT 
+            s.*,
+            ui.puede_ver
+        FROM `{TABLE_ENCUESTAS_SOLICITUDES}` s
+        LEFT JOIN `{TABLE_USUARIO_INST}` ui
+            ON s.cliente_rol = ui.cliente_rol
+            AND s.instalacion_rol = ui.instalacion_rol
+            AND ui.email_login = @user_email
+        WHERE s.encuesta_id = @encuesta_id
+        LIMIT 1
+        """
+        
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("encuesta_id", "STRING", encuesta_id),
+                bigquery.ScalarQueryParameter("user_email", "STRING", user_email),
+            ]
+        )
+        
+        encuesta_result = list(bq_client.query(query_encuesta, job_config=job_config).result())
+        
+        if not encuesta_result:
+            raise HTTPException(status_code=404, detail="Encuesta no encontrada")
+        
+        encuesta = encuesta_result[0]
+        
+        if not encuesta.puede_ver:
+            raise HTTPException(status_code=403, detail="No tiene acceso a esta encuesta")
+        
+        # Obtener preguntas activas
+        query_preguntas = f"""
+        SELECT 
+            pregunta_id,
+            orden,
+            texto_pregunta,
+            tipo_respuesta,
+            requiere_comentario,
+            obligatoria,
+            categoria
+        FROM `{TABLE_ENCUESTAS_PREGUNTAS}`
+        WHERE activa = TRUE
+        ORDER BY orden ASC
+        """
+        
+        preguntas_result = list(bq_client.query(query_preguntas).result())
+        
+        preguntas = []
+        for row in preguntas_result:
+            preguntas.append({
+                "pregunta_id": row.pregunta_id,
+                "orden": row.orden,
+                "texto_pregunta": row.texto_pregunta,
+                "tipo_respuesta": row.tipo_respuesta,
+                "requiere_comentario": row.requiere_comentario,
+                "obligatoria": row.obligatoria,
+                "categoria": row.categoria
+            })
+        
+        return {
+            "success": True,
+            "encuesta": {
+                "encuesta_id": encuesta.encuesta_id,
+                "periodo": encuesta.periodo,
+                "instalacion_rol": encuesta.instalacion_rol,
+                "modo": encuesta.modo,
+                "estado": encuesta.estado,
+                "fecha_limite": encuesta.fecha_limite.isoformat() if encuesta.fecha_limite else None
+            },
+            "preguntas": preguntas
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error obteniendo preguntas: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener preguntas: {str(e)}")
+
+
+@app.post("/api/encuestas/{encuesta_id}/responder")
+async def responder_encuesta(
+    encuesta_id: str,
+    request: RespuestaEncuestaRequest,
+    user_data: dict = Depends(verify_firebase_token)
+):
+    """
+    Guarda las respuestas de una encuesta.
+    
+    Validaciones:
+    - Solo el destinatario puede responder encuestas individuales
+    - Solo la primera respuesta cuenta para encuestas compartidas
+    - No se puede responder encuestas vencidas
+    
+    Body:
+    {
+        "respuestas": [
+            {
+                "pregunta_id": "P001",
+                "respuesta_valor": "5",
+                "comentario": "Excelente servicio"
+            },
+            {
+                "pregunta_id": "P009",
+                "respuesta_texto": "Todo muy bien"
+            }
+        ]
+    }
+    """
+    try:
+        user_email = user_data["email"]
+        user_nombre = user_data.get("nombre_completo", user_email)
+        
+        # Obtener encuesta
+        query_encuesta = f"""
+        SELECT *
+        FROM `{TABLE_ENCUESTAS_SOLICITUDES}`
+        WHERE encuesta_id = @encuesta_id
+        LIMIT 1
+        """
+        
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("encuesta_id", "STRING", encuesta_id),
+            ]
+        )
+        
+        encuesta_result = list(bq_client.query(query_encuesta, job_config=job_config).result())
+        
+        if not encuesta_result:
+            raise HTTPException(status_code=404, detail="Encuesta no encontrada")
+        
+        encuesta = encuesta_result[0]
+        
+        # Validación 1: Encuesta individual - solo el destinatario puede responder
+        if encuesta.modo == 'individual' and encuesta.email_destinatario != user_email:
+            raise HTTPException(
+                status_code=403,
+                detail="Esta encuesta es individual y solo puede ser respondida por el destinatario"
+            )
+        
+        # Validación 2: Encuesta compartida - solo el primero puede responder
+        if encuesta.modo == 'compartida' and encuesta.estado == 'completada':
+            raise HTTPException(
+                status_code=400,
+                detail=f"Esta encuesta ya fue respondida por {encuesta.respondido_por_nombre}"
+            )
+        
+        # Validación 3: Encuesta vencida
+        if encuesta.fecha_limite < datetime.now():
+            raise HTTPException(
+                status_code=400,
+                detail="Esta encuesta ya expiró"
+            )
+        
+        # Validación 4: Ya fue respondida por este usuario
+        if encuesta.estado == 'completada' and encuesta.respondido_por_email == user_email:
+            raise HTTPException(
+                status_code=400,
+                detail="Ya ha respondido esta encuesta"
+            )
+        
+        # Preparar respuestas para insertar
+        ahora = datetime.now()
+        respuestas_para_insertar = []
+        
+        for resp in request.respuestas:
+            respuesta_data = {
+                "respuesta_id": str(uuid.uuid4()),
+                "encuesta_id": encuesta_id,
+                "pregunta_id": resp.get("pregunta_id"),
+                "respuesta_valor": resp.get("respuesta_valor"),  # Para escala 1-5 o texto libre
+                "comentario_adicional": resp.get("comentario"),
+                "fecha_respuesta": ahora
+            }
+            respuestas_para_insertar.append(respuesta_data)
+        
+        # Insertar respuestas en BigQuery
+        errors = bq_client.insert_rows_json(TABLE_ENCUESTAS_RESPUESTAS, respuestas_para_insertar)
+        
+        if errors:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error al guardar respuestas: {errors}"
+            )
+        
+        # Actualizar estado de la encuesta
+        query_update = f"""
+        UPDATE `{TABLE_ENCUESTAS_SOLICITUDES}`
+        SET estado = 'completada',
+            respondido_por_email = @user_email,
+            respondido_por_nombre = @user_nombre,
+            tipo_respuesta = @tipo_respuesta,
+            fecha_respuesta = CURRENT_TIMESTAMP()
+        WHERE encuesta_id = @encuesta_id
+          AND estado = 'pendiente'
+        """
+        
+        # Determinar tipo de respuesta (cliente o WFSA que respondió por cliente)
+        tipo_respuesta = 'cliente' if user_data["permisos"]["rol"] == 'CLIENTE' else 'wfsa'
+        
+        job_config_update = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("encuesta_id", "STRING", encuesta_id),
+                bigquery.ScalarQueryParameter("user_email", "STRING", user_email),
+                bigquery.ScalarQueryParameter("user_nombre", "STRING", user_nombre),
+                bigquery.ScalarQueryParameter("tipo_respuesta", "STRING", tipo_respuesta),
+            ]
+        )
+        
+        bq_client.query(query_update, job_config=job_config_update).result()
+        
+        return {
+            "success": True,
+            "message": "Encuesta respondida exitosamente",
+            "encuesta_id": encuesta_id,
+            "respuestas_guardadas": len(respuestas_para_insertar)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error al responder encuesta: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error al responder encuesta: {str(e)}")
+
+
+@app.get("/api/encuestas/{encuesta_id}/respuestas")
+async def ver_respuestas_encuesta(
+    encuesta_id: str,
+    user_data: dict = Depends(verify_firebase_token)
+):
+    """
+    Obtiene las respuestas de una encuesta completada.
+    
+    Permisos:
+    - WFSA: Puede ver todas las respuestas
+    - CLIENTE: Solo sus encuestas individuales o compartidas de su instalación
+    """
+    try:
+        user_email = user_data["email"]
+        rol = user_data["permisos"]["rol"]
+        es_wfsa = rol in ['ADMIN_WFSA', 'SUBGERENTE_JEFE_WFSA', 'SUPERVISOR_WFSA']
+        
+        # Obtener encuesta
+        query_encuesta = f"""
+        SELECT *
+        FROM `{TABLE_ENCUESTAS_SOLICITUDES}`
+        WHERE encuesta_id = @encuesta_id
+        LIMIT 1
+        """
+        
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("encuesta_id", "STRING", encuesta_id),
+            ]
+        )
+        
+        encuesta_result = list(bq_client.query(query_encuesta, job_config=job_config).result())
+        
+        if not encuesta_result:
+            raise HTTPException(status_code=404, detail="Encuesta no encontrada")
+        
+        encuesta = encuesta_result[0]
+        
+        # Validar permisos
+        if not es_wfsa:
+            # Cliente solo puede ver si es compartida o su individual
+            if encuesta.modo == 'individual' and encuesta.email_destinatario != user_email:
+                raise HTTPException(status_code=403, detail="No tiene permiso para ver estas respuestas")
+        
+        if encuesta.estado != 'completada':
+            raise HTTPException(status_code=400, detail="Esta encuesta aún no ha sido respondida")
+        
+        # Obtener respuestas
+        query_respuestas = f"""
+        SELECT 
+            r.respuesta_id,
+            r.pregunta_id,
+            r.respuesta_valor,
+            r.comentario_adicional,
+            r.fecha_respuesta,
+            p.texto_pregunta,
+            p.tipo_respuesta,
+            p.orden
+        FROM `{TABLE_ENCUESTAS_RESPUESTAS}` r
+        INNER JOIN `{TABLE_ENCUESTAS_PREGUNTAS}` p
+            ON r.pregunta_id = p.pregunta_id
+        WHERE r.encuesta_id = @encuesta_id
+        ORDER BY p.orden ASC
+        """
+        
+        respuestas_result = list(bq_client.query(query_respuestas, job_config=job_config).result())
+        
+        respuestas = []
+        for row in respuestas_result:
+            respuestas.append({
+                "pregunta_id": row.pregunta_id,
+                "texto_pregunta": row.texto_pregunta,
+                "tipo_respuesta": row.tipo_respuesta,
+                "respuesta_valor": row.respuesta_valor,
+                "comentario": row.comentario_adicional,
+                "orden": row.orden
+            })
+        
+        return {
+            "success": True,
+            "encuesta": {
+                "encuesta_id": encuesta.encuesta_id,
+                "periodo": encuesta.periodo,
+                "instalacion_rol": encuesta.instalacion_rol,
+                "modo": encuesta.modo,
+                "respondido_por": encuesta.respondido_por_nombre,
+                "fecha_respuesta": encuesta.fecha_respuesta.isoformat() if encuesta.fecha_respuesta else None
+            },
+            "respuestas": respuestas
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error al obtener respuestas: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener respuestas: {str(e)}")
 
 
 # ============================================
