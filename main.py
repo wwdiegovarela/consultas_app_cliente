@@ -783,8 +783,11 @@ async def get_cobertura_historica_semanal(
           COUNT(DISTINCT ah.instalacion_rol) as num_instalaciones
 
         FROM `{TABLE_HISTORICO}` ah
-        INNER JOIN `{TABLE_USUARIOS}` u ON ah.cliente_rol = u.cliente_rol
-        WHERE u.email_login = @user_email
+        INNER JOIN `{TABLE_USUARIO_INST}` ui 
+          ON ah.cliente_rol = ui.cliente_rol 
+          AND ah.instalacion_rol = ui.instalacion_rol
+        WHERE ui.email_login = @user_email
+          AND ui.puede_ver = TRUE
           AND ah.dia >= DATE_SUB(CURRENT_DATE(), INTERVAL @dias DAY)
           AND ah.dia <= CURRENT_DATE()
         GROUP BY ah.semana, ah.isoweek, ah.ano
