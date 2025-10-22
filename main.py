@@ -35,8 +35,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Cliente de BigQuery
-bq_client = bigquery.Client()
+# Cliente de BigQuery con manejo de errores
+try:
+    bq_client = bigquery.Client()
+    print("✅ BigQuery client inicializado correctamente")
+except Exception as e:
+    print(f"❌ Error inicializando BigQuery client: {e}")
+    bq_client = None
 
 # ============================================
 # CONFIGURACIÓN DE BIGQUERY (VARIABLES DE ENTORNO)
@@ -2104,10 +2109,42 @@ async def update_fcm_token(
 
 
 # ============================================
+# HEALTH CHECK
+# ============================================
+
+@app.get("/health")
+async def health_check():
+    """Endpoint de salud para verificar que el servicio está funcionando"""
+    try:
+        if bq_client is None:
+            return {
+                "status": "unhealthy",
+                "timestamp": datetime.now().isoformat(),
+                "error": "BigQuery client not initialized"
+            }
+        
+        # Verificar conexión a BigQuery
+        bq_client.query("SELECT 1").result()
+        return {
+            "status": "healthy",
+            "timestamp": datetime.now().isoformat(),
+            "bigquery": "connected",
+            "project_id": PROJECT_ID
+        }
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "timestamp": datetime.now().isoformat(),
+            "error": str(e),
+            "project_id": PROJECT_ID
+        }
+
+# ============================================
 # MAIN
 # ============================================
 
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8080))
+    print(f"🚀 Iniciando servidor en puerto {port}")
     uvicorn.run(app, host="0.0.0.0", port=port)
