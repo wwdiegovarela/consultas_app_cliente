@@ -528,7 +528,7 @@ async def get_cobertura_por_instalacion_fast(user: dict = Depends(verify_firebas
             COUNT(*)
           ) * 100, 1) as porcentaje_cobertura,
           
-          -- PPC desde JOIN (más rápido que subquery)
+          -- PPC desde JOIN optimizado (mantener eficiencia)
           COALESCE(ppc.cantidad_ppc, 0) as ppc,
           
           -- FaceID básico
@@ -547,7 +547,7 @@ async def get_cobertura_por_instalacion_fast(user: dict = Depends(verify_firebas
         ) ppc ON ci.instalacion_rol = ppc.instalacion_rol
         WHERE ui.email_login = @user_email
           AND ui.puede_ver = TRUE
-        GROUP BY ci.instalacion_rol, ci.zona, ci.cliente_rol, faceid.nombre
+        GROUP BY ci.instalacion_rol, ci.zona, ci.cliente_rol, faceid.nombre, ppc.instalacion_rol
         ORDER BY guardias_ausentes DESC, porcentaje_cobertura ASC
         """
         
