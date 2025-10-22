@@ -528,8 +528,8 @@ async def get_cobertura_por_instalacion_fast(user: dict = Depends(verify_firebas
             COUNT(*)
           ) * 100, 1) AS porcentaje_cobertura,
           
-          -- PPC desde JOIN optimizado
-          COALESCE(ppc.cantidad_ppc, 0) AS ppc,
+          -- PPC desde JOIN optimizado (alias renombrado para evitar conflicto)
+          COALESCE(ppc.cantidad_ppc, 0) AS cantidad_ppc_total,
           
           -- FaceID básico
           CASE WHEN faceid.nombre IS NOT NULL THEN TRUE ELSE FALSE END AS tiene_faceid
@@ -577,7 +577,7 @@ async def get_cobertura_por_instalacion_fast(user: dict = Depends(verify_firebas
                 "guardias_ausentes": row.guardias_ausentes,
                 "porcentaje_cobertura": porcentaje,
                 "estado_semaforo": calcular_estado_semaforo(porcentaje),
-                "ppc": row.ppc,
+                "ppc": row.cantidad_ppc_total,
                 "tiene_faceid": bool(row.tiene_faceid),
             })
         
