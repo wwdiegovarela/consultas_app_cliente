@@ -501,7 +501,7 @@ async def get_cobertura_por_instalacion(user: dict = Depends(verificar_permiso_c
 
 
 @app.get("/api/cobertura/instantanea/por-instalacion-fast")
-async def get_cobertura_por_instalacion_fast(user: dict = Depends(get_current_user)):
+async def get_cobertura_por_instalacion_fast(user: dict = Depends(verify_firebase_token)):
     """
     Versión optimizada del endpoint de instalaciones.
     - Elimina subqueries
