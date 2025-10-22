@@ -547,7 +547,7 @@ async def get_cobertura_por_instalacion_fast(user: dict = Depends(verify_firebas
         ) ppc ON ci.instalacion_rol = ppc.instalacion_rol
         WHERE ui.email_login = @user_email
           AND ui.puede_ver = TRUE
-        GROUP BY ci.instalacion_rol, ci.zona, ci.cliente_rol, faceid.nombre, ppc.cantidad_ppc
+        GROUP BY ci.instalacion_rol, ci.zona, ci.cliente_rol, faceid.nombre
         ORDER BY guardias_ausentes DESC, porcentaje_cobertura ASC
         """
         
