@@ -517,22 +517,22 @@ async def get_cobertura_por_instalacion_fast(user: dict = Depends(verify_firebas
           ci.zona,
           ci.cliente_rol,
           
-          -- Contadores básicos (más rápidos)
-          COUNT(*) as total_guardias_requeridos,
-          SUM(CASE WHEN ci.asistencia = 1 THEN 1 ELSE 0 END) as guardias_presentes,
-          COUNT(*) - SUM(CASE WHEN ci.asistencia = 1 THEN 1 ELSE 0 END) as guardias_ausentes,
+          -- Contadores básicos
+          COUNT(*) AS total_guardias_requeridos,
+          SUM(CASE WHEN ci.asistencia = 1 THEN 1 ELSE 0 END) AS guardias_presentes,
+          COUNT(*) - SUM(CASE WHEN ci.asistencia = 1 THEN 1 ELSE 0 END) AS guardias_ausentes,
           
-          -- Porcentaje simplificado
+          -- Porcentaje de Cobertura
           ROUND(SAFE_DIVIDE(
             SUM(CASE WHEN ci.asistencia = 1 THEN 1 ELSE 0 END),
             COUNT(*)
-          ) * 100, 1) as porcentaje_cobertura,
+          ) * 100, 1) AS porcentaje_cobertura,
           
-          -- PPC desde JOIN optimizado (mantener eficiencia)
-          COALESCE(ppc.cantidad_ppc, 0) as ppc,
+          -- PPC desde JOIN optimizado
+          COALESCE(ppc.cantidad_ppc, 0) AS ppc,
           
           -- FaceID básico
-          CASE WHEN faceid.nombre IS NOT NULL THEN TRUE ELSE FALSE END as tiene_faceid
+          CASE WHEN faceid.nombre IS NOT NULL THEN TRUE ELSE FALSE END AS tiene_faceid
 
         FROM `{TABLE_COBERTURA}` ci
         INNER JOIN `{TABLE_USUARIO_INST}` ui 
@@ -541,13 +541,14 @@ async def get_cobertura_por_instalacion_fast(user: dict = Depends(verify_firebas
         LEFT JOIN `{PROJECT_ID}.{DATASET_REPORTES}.cr_equipos_faceid` faceid
           ON ci.instalacion_rol = faceid.nombre
         LEFT JOIN (
-          SELECT instalacion_rol, COUNT(*) as cantidad_ppc
+          -- Subconsulta optimizada para contar PPC por instalación
+          SELECT instalacion_rol, COUNT(*) AS cantidad_ppc
           FROM `{PROJECT_ID}.cr_vistas_reporte.cr_ppc_dia`
           GROUP BY instalacion_rol
         ) ppc ON ci.instalacion_rol = ppc.instalacion_rol
         WHERE ui.email_login = @user_email
           AND ui.puede_ver = TRUE
-        GROUP BY ci.instalacion_rol, ci.zona, ci.cliente_rol, faceid.nombre, ppc.instalacion_rol
+        GROUP BY ci.instalacion_rol, ci.zona, ci.cliente_rol, faceid.nombre
         ORDER BY guardias_ausentes DESC, porcentaje_cobertura ASC
         """
         
