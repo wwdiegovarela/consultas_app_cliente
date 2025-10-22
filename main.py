@@ -402,6 +402,7 @@ async def get_cobertura_por_instalacion(user: dict = Depends(verificar_permiso_c
         SELECT 
           ci.instalacion_rol,
           ci.zona,
+          ci.cliente_rol,
           
           -- Contadores
           COUNT(*) as total_guardias_requeridos,
@@ -444,7 +445,7 @@ async def get_cobertura_por_instalacion(user: dict = Depends(verificar_permiso_c
           ON ci.instalacion_rol = faceid.nombre
         WHERE ui.email_login = @user_email
           AND ui.puede_ver = TRUE
-        GROUP BY ci.instalacion_rol, ci.zona, faceid.nombre, faceid.numero, faceid.ult_conexion
+        GROUP BY ci.instalacion_rol, ci.zona, ci.cliente_rol, faceid.nombre, faceid.numero, faceid.ult_conexion
         ORDER BY guardias_ausentes DESC, porcentaje_cobertura ASC, ci.instalacion_rol
         """
         
@@ -464,6 +465,7 @@ async def get_cobertura_por_instalacion(user: dict = Depends(verificar_permiso_c
             instalaciones.append({
                 "instalacion_rol": row.instalacion_rol,
                 "zona": row.zona,
+                "cliente_rol": row.cliente_rol,
                 "total_guardias_requeridos": row.total_guardias_requeridos,
                 "guardias_presentes": row.guardias_presentes,
                 "guardias_ausentes": row.guardias_ausentes,
