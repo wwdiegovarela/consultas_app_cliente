@@ -422,12 +422,8 @@ async def get_cobertura_por_instalacion(user: dict = Depends(verificar_permiso_c
           -- Turnos activos
           COUNT(DISTINCT ci.turno) as cantidad_turnos_activos,
           
-          -- PPC (Puestos Por Cubrir)
-          COALESCE((
-            SELECT COUNT(*)
-            FROM `{PROJECT_ID}.cr_vistas_reporte.cr_ppc_dia` ppc
-            WHERE ppc.instalacion_rol = ci.instalacion_rol
-          ), 0) as ppc,
+          -- PPC (Puestos Por Cubrir) - Optimizado con LEFT JOIN
+          COALESCE(ppc.cantidad_ppc, 0) as ppc,
           
           -- FaceID (verificar si la instalación tiene equipo Face ID)
           CASE 
@@ -443,16 +439,26 @@ async def get_cobertura_por_instalacion(user: dict = Depends(verificar_permiso_c
           AND ci.instalacion_rol = ui.instalacion_rol
         LEFT JOIN `{PROJECT_ID}.{DATASET_REPORTES}.cr_equipos_faceid` faceid
           ON ci.instalacion_rol = faceid.nombre
+        LEFT JOIN (
+          SELECT instalacion_rol, COUNT(*) as cantidad_ppc
+          FROM `{PROJECT_ID}.cr_vistas_reporte.cr_ppc_dia`
+          GROUP BY instalacion_rol
+        ) ppc ON ci.instalacion_rol = ppc.instalacion_rol
         WHERE ui.email_login = @user_email
           AND ui.puede_ver = TRUE
-        GROUP BY ci.instalacion_rol, ci.zona, ci.cliente_rol, faceid.nombre, faceid.numero, faceid.ult_conexion
+        GROUP BY ci.instalacion_rol, ci.zona, ci.cliente_rol, faceid.nombre, faceid.numero, faceid.ult_conexion, ppc.cantidad_ppc
         ORDER BY guardias_ausentes DESC, porcentaje_cobertura ASC, ci.instalacion_rol
         """
         
         job_config = bigquery.QueryJobConfig(
             query_parameters=[
                 bigquery.ScalarQueryParameter("user_email", "STRING", user_email)
-            ]
+            ],
+            # Optimizaciones de rendimiento
+            use_query_cache=True,
+            use_legacy_sql=False,
+            # Timeout más largo para consultas complejas
+            job_timeout_ms=300000,  # 5 minutos
         )
         
         query_job = bq_client.query(query, job_config=job_config)
@@ -483,6 +489,96 @@ async def get_cobertura_por_instalacion(user: dict = Depends(verificar_permiso_c
         return {
             "total_instalaciones": len(instalaciones),
             "instalaciones": instalaciones
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al consultar BigQuery: {str(e)}")
+
+
+@app.get("/api/cobertura/instantanea/por-instalacion-fast")
+async def get_cobertura_por_instalacion_fast(user: dict = Depends(get_current_user)):
+    """
+    Versión optimizada del endpoint de instalaciones.
+    - Elimina subqueries
+    - Usa JOINs optimizados
+    - Incluye caché de BigQuery
+    """
+    user_email = user["email"]
+    
+    try:
+        query = f"""
+        SELECT 
+          ci.instalacion_rol,
+          ci.zona,
+          ci.cliente_rol,
+          
+          -- Contadores básicos (más rápidos)
+          COUNT(*) as total_guardias_requeridos,
+          SUM(CASE WHEN ci.asistencia = 1 THEN 1 ELSE 0 END) as guardias_presentes,
+          COUNT(*) - SUM(CASE WHEN ci.asistencia = 1 THEN 1 ELSE 0 END) as guardias_ausentes,
+          
+          -- Porcentaje simplificado
+          ROUND(SAFE_DIVIDE(
+            SUM(CASE WHEN ci.asistencia = 1 THEN 1 ELSE 0 END),
+            COUNT(*)
+          ) * 100, 1) as porcentaje_cobertura,
+          
+          -- PPC desde JOIN (más rápido que subquery)
+          COALESCE(ppc.cantidad_ppc, 0) as ppc,
+          
+          -- FaceID básico
+          CASE WHEN faceid.nombre IS NOT NULL THEN TRUE ELSE FALSE END as tiene_faceid
+
+        FROM `{TABLE_COBERTURA}` ci
+        INNER JOIN `{TABLE_USUARIO_INST}` ui 
+          ON ci.cliente_rol = ui.cliente_rol 
+          AND ci.instalacion_rol = ui.instalacion_rol
+        LEFT JOIN `{PROJECT_ID}.{DATASET_REPORTES}.cr_equipos_faceid` faceid
+          ON ci.instalacion_rol = faceid.nombre
+        LEFT JOIN (
+          SELECT instalacion_rol, COUNT(*) as cantidad_ppc
+          FROM `{PROJECT_ID}.cr_vistas_reporte.cr_ppc_dia`
+          GROUP BY instalacion_rol
+        ) ppc ON ci.instalacion_rol = ppc.instalacion_rol
+        WHERE ui.email_login = @user_email
+          AND ui.puede_ver = TRUE
+        GROUP BY ci.instalacion_rol, ci.zona, ci.cliente_rol, faceid.nombre, ppc.cantidad_ppc
+        ORDER BY guardias_ausentes DESC, porcentaje_cobertura ASC
+        """
+        
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("user_email", "STRING", user_email)
+            ],
+            use_query_cache=True,
+            use_legacy_sql=False,
+            job_timeout_ms=120000,  # 2 minutos
+        )
+        
+        query_job = bq_client.query(query, job_config=job_config)
+        results = query_job.result()
+        
+        instalaciones = []
+        for row in results:
+            porcentaje = float(row.porcentaje_cobertura) if row.porcentaje_cobertura else 0
+            
+            instalaciones.append({
+                "instalacion_rol": row.instalacion_rol,
+                "zona": row.zona,
+                "cliente_rol": row.cliente_rol,
+                "total_guardias_requeridos": row.total_guardias_requeridos,
+                "guardias_presentes": row.guardias_presentes,
+                "guardias_ausentes": row.guardias_ausentes,
+                "porcentaje_cobertura": porcentaje,
+                "estado_semaforo": calcular_estado_semaforo(porcentaje),
+                "ppc": row.ppc,
+                "tiene_faceid": bool(row.tiene_faceid),
+            })
+        
+        return {
+            "total_instalaciones": len(instalaciones),
+            "instalaciones": instalaciones,
+            "optimized": True
         }
         
     except Exception as e:
