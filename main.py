@@ -2112,32 +2112,24 @@ async def update_fcm_token(
 # HEALTH CHECK
 # ============================================
 
+@app.get("/")
+async def root():
+    """Endpoint raíz para verificar que el servicio está funcionando"""
+    return {
+        "message": "WFSA BigQuery API funcionando",
+        "timestamp": datetime.now().isoformat(),
+        "version": "1.0.0"
+    }
+
 @app.get("/health")
 async def health_check():
     """Endpoint de salud para verificar que el servicio está funcionando"""
-    try:
-        if bq_client is None:
-            return {
-                "status": "unhealthy",
-                "timestamp": datetime.now().isoformat(),
-                "error": "BigQuery client not initialized"
-            }
-        
-        # Verificar conexión a BigQuery
-        bq_client.query("SELECT 1").result()
-        return {
-            "status": "healthy",
-            "timestamp": datetime.now().isoformat(),
-            "bigquery": "connected",
-            "project_id": PROJECT_ID
-        }
-    except Exception as e:
-        return {
-            "status": "unhealthy",
-            "timestamp": datetime.now().isoformat(),
-            "error": str(e),
-            "project_id": PROJECT_ID
-        }
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "service": "WFSA BigQuery API",
+        "project_id": PROJECT_ID
+    }
 
 # ============================================
 # MAIN

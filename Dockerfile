@@ -20,6 +20,10 @@ EXPOSE 8080
 ENV PORT=8080
 ENV PYTHONUNBUFFERED=1
 ENV ENVIRONMENT=production
+ENV GCP_PROJECT_ID=worldwide-470917
+ENV DATASET_REPORTES=cr_reportes
+ENV DATASET_APP=app_clientes
+ENV CORS_ORIGINS=*
 
 # Comando para ejecutar la aplicación
-CMD exec uvicorn main:app --host 0.0.0.0 --port ${PORT}
+CMD ["python", "main.py"]
