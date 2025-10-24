@@ -19,7 +19,7 @@ except ValueError:
     # Ya está inicializado
     pass
 
-# Inicializar FastAPI
+# Inicializar API
 app = FastAPI(
     title="WFSA BigQuery API",
     version="1.0.0",
@@ -536,8 +536,7 @@ async def get_cobertura_por_instalacion_fast(user: dict = Depends(verify_firebas
 
         FROM `{TABLE_COBERTURA}` ci
         INNER JOIN `{TABLE_USUARIO_INST}` ui 
-          ON ci.cliente_rol = ui.cliente_rol 
-          AND ci.instalacion_rol = ui.instalacion_rol
+          ON ci.instalacion_rol = ui.instalacion_rol
         LEFT JOIN `{PROJECT_ID}.{DATASET_REPORTES}.cr_equipos_faceid` faceid
           ON ci.instalacion_rol = faceid.nombre
         LEFT JOIN (
