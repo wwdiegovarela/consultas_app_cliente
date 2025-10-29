@@ -701,6 +701,8 @@ async def get_detalle_todas_instalaciones(
                 "hora_salida_planificada": row.hora_salida_planificada,
                 "rut_planificado": row.rut_planificado,
                 "rut_asistente": row.rut_asistente,
+                "nombre_planificado":row.nombre_planificado,
+                "nombre_asistente":row.nombre_asistente,
                 "hora_entrada_real": row.hora_entrada_real,
                 "hora_salida_real": row.hora_salida_real,
                 "asistio": bool(row.asistencia),
