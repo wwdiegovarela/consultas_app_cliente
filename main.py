@@ -706,7 +706,7 @@ async def get_detalle_todas_instalaciones(
                 "asistio": bool(row.asistencia),
                 "estado_cobertura": row.estado_cobertura,
                 "turno_extra": row.turno_extra,
-                "relevo": row.relevo,
+
                 "tipo": row.tipo,
                 "motivo_incumplimiento": row.motivo_incumplimiento,
                 "puntualidad": row.puntualidad
