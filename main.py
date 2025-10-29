@@ -612,9 +612,10 @@ async def get_detalle_todas_instalaciones(
           
           -- Información del guardia planificado
           ci.rutrol as rut_planificado,
-          
+          ci.nombrerol as nombre_planificado,
           -- Información del guardia que asistió
           ci.rutasi as rut_asistente,
+          TRIM(ARRAY_REVERSE(SPLIT(ci.relevo, ' | '))[OFFSET(0)]) as nombre_asistente,
           FORMAT_DATETIME('%H:%M', ci.entrada) as hora_entrada_real,
           FORMAT_DATETIME('%H:%M', ci.salida) as hora_salida_real,
           
@@ -622,7 +623,7 @@ async def get_detalle_todas_instalaciones(
           ci.asistencia,
           ci.COB as estado_cobertura,
           ci.tvf as turno_extra,
-          ci.relevo,
+          
           ci.tipo,
           ci.motivoppc as motivo_incumplimiento,
           
@@ -636,8 +637,7 @@ async def get_detalle_todas_instalaciones(
 
         FROM `{TABLE_COBERTURA}` ci
         INNER JOIN `{TABLE_USUARIO_INST}` ui 
-          ON ci.cliente_rol = ui.cliente_rol 
-          AND ci.instalacion_rol = ui.instalacion_rol
+          ON ci.instalacion_rol = ui.instalacion_rol
         WHERE ui.email_login = @user_email
           AND ui.puede_ver = TRUE
         ORDER BY ci.instalacion_rol, ci.turno, ci.her
