@@ -512,28 +512,32 @@ async def get_cobertura_por_instalacion_fast(user: dict = Depends(verify_firebas
     
     try:
         query = f"""
-        SELECT 
+                SELECT 
           ci.instalacion_rol,
           ci.zona,
           ci.cliente_rol,
+          ci.tipo_de_servicio,  -- 👈 AGREGADO
           
-          -- Contadores básicos
+          -- Contadores básicos (ahora por tipo de servicio)
           COUNT(*) AS total_guardias_requeridos,
           SUM(CASE WHEN ci.asistencia = 1 THEN 1 ELSE 0 END) AS guardias_presentes,
           COUNT(*) - SUM(CASE WHEN ci.asistencia = 1 THEN 1 ELSE 0 END) AS guardias_ausentes,
           
-          -- Porcentaje de Cobertura
+          -- Porcentaje de Cobertura (por tipo de servicio)
           ROUND(SAFE_DIVIDE(
             SUM(CASE WHEN ci.asistencia = 1 THEN 1 ELSE 0 END),
             COUNT(*)
           ) * 100, 1) AS porcentaje_cobertura,
           
-          -- PPC desde JOIN optimizado (alias renombrado para evitar conflicto)
-          COALESCE(ppc.cantidad_ppc, 0) AS cantidad_ppc_total,
+          -- PPC solo para tipo "1 Servicio" (0 para otros tipos)
+          CASE 
+            WHEN ci.tipo_de_servicio = '1 Servicio' THEN COALESCE(ppc.cantidad_ppc, 0)
+            ELSE 0
+          END AS cantidad_ppc_total,
           
           -- FaceID básico
           CASE WHEN faceid.nombre IS NOT NULL THEN TRUE ELSE FALSE END AS tiene_faceid
-
+        
         FROM `{TABLE_COBERTURA}` ci
         INNER JOIN `{TABLE_USUARIO_INST}` ui 
           ON ci.instalacion_rol = ui.instalacion_rol
@@ -547,7 +551,7 @@ async def get_cobertura_por_instalacion_fast(user: dict = Depends(verify_firebas
         ) ppc ON ci.instalacion_rol = ppc.instalacion_rol
         WHERE ui.email_login = @user_email
           AND ui.puede_ver = TRUE
-        GROUP BY ci.instalacion_rol, ci.zona, ci.cliente_rol, faceid.nombre, ppc.cantidad_ppc
+        GROUP BY ci.instalacion_rol, ci.zona, ci.cliente_rol, ci.tipo_de_servicio, faceid.nombre, ppc.cantidad_ppc  -- 👈 AGREGADO tipo_de_servicio
         ORDER BY guardias_ausentes DESC, porcentaje_cobertura ASC
         """
         
