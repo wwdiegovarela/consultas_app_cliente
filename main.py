@@ -530,10 +530,11 @@ async def get_cobertura_por_instalacion_fast(user: dict = Depends(verify_firebas
           ) * 100, 1) AS porcentaje_cobertura,
           
           -- PPC solo para tipo "1 Servicio" (0 para otros tipos)
-          CASE 
-            WHEN ci.tipo_de_servicio = '1 Servicio' THEN COALESCE(ppc.cantidad_ppc, 0)
-            ELSE 0
-          END AS cantidad_ppc_total,
+          --CASE 
+          --  WHEN ci.tipo_de_servicio = '1 Servicio' THEN COALESCE(ppc.cantidad_ppc, 0)
+          --  ELSE 0
+          --END 
+          COALESCE(ppc.cantidad_ppc, 0) AS cantidad_ppc_total,
           
           -- FaceID básico
           CASE WHEN faceid.nombre IS NOT NULL THEN TRUE ELSE FALSE END AS tiene_faceid
@@ -631,7 +632,7 @@ async def get_detalle_todas_instalaciones(
           
           ci.tipo,
           ci.motivoppc as motivo_incumplimiento,
-          ci.tipo_de_servicio as tipo_de_servicio,
+         -- ci.tipo_de_servicio as tipo_de_servicio,
           -- Indicador de retraso (si asistió)
           CASE 
             WHEN ci.asistencia = 1 AND ci.entrada > ci.her THEN 
