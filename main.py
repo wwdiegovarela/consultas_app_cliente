@@ -516,7 +516,7 @@ async def get_cobertura_por_instalacion_fast(user: dict = Depends(verify_firebas
           ci.instalacion_rol,
           ci.zona,
           ci.cliente_rol,
-          ci.tipo_de_servicio,  -- 👈 AGREGADO
+          --ci.tipo_de_servicio,  -- 👈 AGREGADO
           
           -- Contadores básicos (ahora por tipo de servicio)
           COUNT(*) AS total_guardias_requeridos,
@@ -551,7 +551,8 @@ async def get_cobertura_por_instalacion_fast(user: dict = Depends(verify_firebas
         ) ppc ON ci.instalacion_rol = ppc.instalacion_rol
         WHERE ui.email_login = @user_email
           AND ui.puede_ver = TRUE
-        GROUP BY ci.instalacion_rol, ci.zona, ci.cliente_rol, ci.tipo_de_servicio, faceid.nombre, ppc.cantidad_ppc  -- 👈 AGREGADO tipo_de_servicio
+        GROUP BY ci.instalacion_rol, ci.zona, ci.cliente_rol--, ci.tipo_de_servicio
+        , faceid.nombre, ppc.cantidad_ppc  -- 👈 AGREGADO tipo_de_servicio
         ORDER BY guardias_ausentes DESC, porcentaje_cobertura ASC
         """
         
