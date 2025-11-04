@@ -626,7 +626,7 @@ async def get_detalle_todas_instalaciones(
           
           ci.tipo,
           ci.motivoppc as motivo_incumplimiento,
-          
+          ci.tipo_de_servicio as tipo_de_servicio,
           -- Indicador de retraso (si asistió)
           CASE 
             WHEN ci.asistencia = 1 AND ci.entrada > ci.her THEN 
