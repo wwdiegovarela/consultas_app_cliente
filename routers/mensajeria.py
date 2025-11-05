@@ -151,8 +151,56 @@ async def get_usuarios_wfsa_instalacion(
         query_job = get_bq_client().query(query, job_config=job_config)
         results = list(query_job.result())
         
-        print(f"[DEBUG] Query ejecutada para instalacion_rol: {instalacion_rol}")
+        print(f"[DEBUG] Query ejecutada para instalacion_rol: '{instalacion_rol}'")
         print(f"[DEBUG] Resultados encontrados: {len(results)}")
+        
+        # Query simplificada para diagnosticar JOINs
+        if len(results) == 0:
+            print(f"[DEBUG] Ejecutando queries de diagnóstico...")
+            
+            # Query 1: Verificar usuarios en usuario_contactos relacionados con instalacion_contacto
+            diag_query1 = f"""
+            SELECT DISTINCT
+              uc.email_login,
+              ic.contacto_id,
+              ic.instalacion_rol
+            FROM `{TABLE_INST_CONTACTO}` ic
+            LEFT JOIN `{TABLE_USUARIO_CONTACTOS}` uc 
+              ON ic.contacto_id = uc.contacto_id 
+              AND ic.instalacion_rol = uc.instalacion_rol
+            WHERE ic.instalacion_rol = @instalacion_rol
+            LIMIT 10
+            """
+            diag_job1 = get_bq_client().query(diag_query1, job_config=job_config)
+            diag_results1 = list(diag_job1.result())
+            print(f"[DEBUG] JOIN instalacion_contacto -> usuario_contactos: {len(diag_results1)} filas")
+            if diag_results1:
+                for row in diag_results1[:3]:
+                    print(f"  - contacto_id: {row.contacto_id}, email: {row.email_login}")
+            
+            # Query 2: Verificar si esos emails existen en v_permisos_usuarios
+            if diag_results1 and diag_results1[0].email_login:
+                sample_email = diag_results1[0].email_login
+                diag_query2 = f"""
+                SELECT email_login, rol_id, usuario_activo, firebase_uid
+                FROM `{PROJECT_ID}.{DATASET_APP}.v_permisos_usuarios`
+                WHERE email_login = @sample_email
+                LIMIT 1
+                """
+                diag_job_config2 = bigquery.QueryJobConfig(
+                    query_parameters=[
+                        bigquery.ScalarQueryParameter("sample_email", "STRING", sample_email)
+                    ]
+                )
+                diag_job2 = get_bq_client().query(diag_query2, diag_job_config2)
+                diag_results2 = list(diag_job2.result())
+                if diag_results2:
+                    print(f"[DEBUG] Usuario '{sample_email}' en v_permisos_usuarios:")
+                    print(f"  - rol_id: {diag_results2[0].rol_id}")
+                    print(f"  - usuario_activo: {diag_results2[0].usuario_activo}")
+                    print(f"  - firebase_uid: {diag_results2[0].firebase_uid}")
+                else:
+                    print(f"[DEBUG] Usuario '{sample_email}' NO encontrado en v_permisos_usuarios")
         
         # Si no hay resultados, intentar queries de debug
         if len(results) == 0:
