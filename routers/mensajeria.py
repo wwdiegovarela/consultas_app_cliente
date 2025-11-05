@@ -99,7 +99,8 @@ async def get_usuarios_wfsa_instalacion(
         query = f"""
         -- Usuarios WFSA desde instalacion_contacto usando tabla contactos
         -- instalacion_contacto -> contactos (contacto_id) -> v_permisos_usuarios (email_usuario_app)
-        WITH usuarios_wfsa_ic AS (
+        -- IMPORTANTE: Solo usuarios WFSA que están en la tabla contactos
+        WITH usuarios_wfsa AS (
           SELECT DISTINCT
             u.email_login,
             u.firebase_uid,
@@ -116,20 +117,6 @@ async def get_usuarios_wfsa_instalacion(
             AND c.activo = TRUE  -- Solo contactos activos
             AND c.es_usuario_app = TRUE  -- Solo contactos que son usuarios de la app
         ),
-        -- Usuarios WFSA desde usuario_instalaciones (fallback si instalacion_contacto no funciona)
-        usuarios_wfsa_ui AS (
-          SELECT DISTINCT
-            u.email_login,
-            u.firebase_uid,
-            u.nombre_completo,
-            u.rol_id
-          FROM `{TABLE_USUARIO_INST}` ui
-          JOIN `{PROJECT_ID}.{DATASET_APP}.v_permisos_usuarios` u
-            ON ui.email_login = u.email_login
-          WHERE ui.instalacion_rol = @instalacion_rol
-            AND u.rol_id != 'CLIENTE'  -- Solo usuarios WFSA
-            AND u.usuario_activo = TRUE
-        ),
         -- Clientes desde usuario_instalaciones
         clientes_instalacion AS (
           SELECT DISTINCT
@@ -144,10 +131,8 @@ async def get_usuarios_wfsa_instalacion(
             AND u.rol_id = 'CLIENTE'  -- Solo clientes
             AND u.usuario_activo = TRUE
         )
-        -- Combinar todos los resultados (WFSA de ambas fuentes + clientes)
-        SELECT * FROM usuarios_wfsa_ic
-        UNION DISTINCT
-        SELECT * FROM usuarios_wfsa_ui
+        -- Combinar resultados (WFSA desde contactos + clientes desde usuario_instalaciones)
+        SELECT * FROM usuarios_wfsa
         UNION DISTINCT
         SELECT * FROM clientes_instalacion
         ORDER BY nombre_completo
