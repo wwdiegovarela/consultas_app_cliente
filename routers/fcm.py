@@ -3,7 +3,7 @@ Endpoints de FCM (Firebase Cloud Messaging)
 """
 from fastapi import APIRouter, HTTPException, Depends
 from google.cloud import bigquery
-from dependencies import verify_firebase_token, bq_client
+from dependencies import verify_firebase_token, get_bq_client
 from models.schemas import FCMTokenRequest
 from config import TABLE_USUARIOS
 
@@ -41,7 +41,7 @@ async def update_fcm_token(
             ]
         )
         
-        query_job = bq_client.query(query, job_config=job_config)
+        query_job = get_bq_client().query(query, job_config=job_config)
         query_job.result()  # Esperar a que termine
         
         print(f"✅ FCM token actualizado para {user_email}")

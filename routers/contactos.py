@@ -3,7 +3,7 @@ Endpoints de contactos WhatsApp
 """
 from fastapi import APIRouter, HTTPException, Depends
 from google.cloud import bigquery
-from dependencies import verify_firebase_token, bq_client
+from dependencies import verify_firebase_token, get_bq_client
 from config import TABLE_USUARIO_INST, TABLE_INST_CONTACTO, TABLE_CONTACTOS
 
 router = APIRouter()
@@ -46,7 +46,7 @@ async def get_contactos_instalacion(
             ]
         )
         
-        query_job = bq_client.query(query, job_config=job_config)
+        query_job = get_bq_client().query(query, job_config=job_config)
         results = query_job.result()
         
         contactos = []

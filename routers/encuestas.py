@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from google.cloud import bigquery
 from datetime import datetime, timezone
 import uuid
-from dependencies import verify_firebase_token, bq_client
+from dependencies import verify_firebase_token, get_bq_client
 from models.schemas import RespuestaEncuestaRequest
 from config import (
     TABLE_ENCUESTAS_SOLICITUDES, TABLE_ENCUESTAS_PREGUNTAS,
@@ -129,7 +129,7 @@ async def obtener_mis_encuestas(user_data: dict = Depends(verify_firebase_token)
             ]
         )
         
-        results = list(bq_client.query(query, job_config=job_config).result())
+        results = list(get_bq_client().query(query, job_config=job_config).result())
         
         # Agrupar por instalación
         instalaciones_dict = {}
@@ -241,7 +241,7 @@ async def obtener_preguntas_encuesta(
             ]
         )
         
-        encuesta_result = list(bq_client.query(query_encuesta, job_config=job_config).result())
+        encuesta_result = list(get_bq_client().query(query_encuesta, job_config=job_config).result())
         
         if not encuesta_result:
             raise HTTPException(status_code=404, detail="Encuesta no encontrada")
@@ -265,7 +265,7 @@ async def obtener_preguntas_encuesta(
         ORDER BY orden ASC
         """
         
-        preguntas_result = list(bq_client.query(query_preguntas).result())
+        preguntas_result = list(get_bq_client().query(query_preguntas).result())
         
         preguntas = []
         for row in preguntas_result:
@@ -325,7 +325,7 @@ async def responder_encuesta(
             ]
         )
         
-        encuesta_result = list(bq_client.query(query_encuesta, job_config=job_config).result())
+        encuesta_result = list(get_bq_client().query(query_encuesta, job_config=job_config).result())
         
         if not encuesta_result:
             raise HTTPException(status_code=404, detail="Encuesta no encontrada")
@@ -371,7 +371,7 @@ async def responder_encuesta(
             }
             respuestas_para_insertar.append(respuesta_data)
         
-        errors = bq_client.insert_rows_json(TABLE_ENCUESTAS_RESPUESTAS, respuestas_para_insertar)
+        errors = get_bq_client().insert_rows_json(TABLE_ENCUESTAS_RESPUESTAS, respuestas_para_insertar)
         
         if errors:
             raise HTTPException(
@@ -402,7 +402,7 @@ async def responder_encuesta(
             ]
         )
         
-        bq_client.query(query_update, job_config=job_config_update).result()
+        get_bq_client().query(query_update, job_config=job_config_update).result()
         
         return {
             "success": True,
@@ -444,7 +444,7 @@ async def ver_respuestas_encuesta(
             ]
         )
         
-        encuesta_result = list(bq_client.query(query_encuesta, job_config=job_config).result())
+        encuesta_result = list(get_bq_client().query(query_encuesta, job_config=job_config).result())
         
         if not encuesta_result:
             raise HTTPException(status_code=404, detail="Encuesta no encontrada")
@@ -475,7 +475,7 @@ async def ver_respuestas_encuesta(
         ORDER BY p.orden ASC
         """
         
-        respuestas_result = list(bq_client.query(query_respuestas, job_config=job_config).result())
+        respuestas_result = list(get_bq_client().query(query_respuestas, job_config=job_config).result())
         
         respuestas = []
         for row in respuestas_result:

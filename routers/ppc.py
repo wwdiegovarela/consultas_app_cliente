@@ -3,7 +3,7 @@ Endpoints de Puestos Por Cubrir (PPC)
 """
 from fastapi import APIRouter, HTTPException, Depends
 from google.cloud import bigquery
-from dependencies import verificar_permiso_cobertura, bq_client
+from dependencies import verificar_permiso_cobertura, get_bq_client
 from config import PROJECT_ID, TABLE_USUARIO_INST
 
 router = APIRouter()
@@ -33,7 +33,7 @@ async def get_ppc_total(user: dict = Depends(verificar_permiso_cobertura)):
             ]
         )
         
-        query_job = bq_client.query(query, job_config=job_config)
+        query_job = get_bq_client().query(query, job_config=job_config)
         results = list(query_job.result())
         
         if not results:
@@ -87,7 +87,7 @@ async def get_ppc_todas_instalaciones(
             ]
         )
         
-        query_job = bq_client.query(query, job_config=job_config)
+        query_job = get_bq_client().query(query, job_config=job_config)
         results = query_job.result()
         
         # Agrupar por instalación
@@ -160,7 +160,7 @@ async def get_ppc_por_instalacion(
             ]
         )
         
-        query_job = bq_client.query(query, job_config=job_config)
+        query_job = get_bq_client().query(query, job_config=job_config)
         results = query_job.result()
         
         ppc_por_turno = []

@@ -3,7 +3,7 @@ Endpoints para el módulo de mensajería (chat)
 """
 from fastapi import APIRouter, HTTPException, Depends
 from google.cloud import bigquery
-from dependencies import verify_firebase_token, bq_client
+from dependencies import verify_firebase_token, get_bq_client
 from config import PROJECT_ID, DATASET_APP, TABLE_USUARIO_INST, TABLE_INST_CONTACTO, TABLE_USUARIO_CONTACTOS
 
 router = APIRouter()
@@ -60,7 +60,7 @@ async def get_contactos_usuario(
             ]
         )
         
-        query_job = bq_client.query(query, job_config=job_config)
+        query_job = get_bq_client().query(query, job_config=job_config)
         results = query_job.result()
         
         contactos = []
@@ -116,7 +116,7 @@ async def get_usuarios_wfsa_instalacion(
             ]
         )
         
-        query_job = bq_client.query(query, job_config=job_config)
+        query_job = get_bq_client().query(query, job_config=job_config)
         results = query_job.result()
         
         usuarios = []

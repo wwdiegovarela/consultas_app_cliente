@@ -4,7 +4,7 @@ Endpoints de mensajes WhatsApp
 from fastapi import APIRouter, HTTPException, Depends
 from google.cloud import bigquery
 import uuid
-from dependencies import verify_firebase_token, verificar_permiso_mensajes, bq_client
+from dependencies import verify_firebase_token, verificar_permiso_mensajes, get_bq_client
 from models.schemas import EnviarMensajeRequest
 from config import PROJECT_ID, DATASET_APP, TABLE_CONTACTOS, TABLE_USUARIO_CONTACTOS, TABLE_MENSAJES
 
@@ -48,7 +48,7 @@ async def enviar_mensaje_whatsapp(
                 ]
             )
             
-            query_job = bq_client.query(query, job_config=job_config)
+            query_job = get_bq_client().query(query, job_config=job_config)
             contactos = list(query_job.result())
             
             # Enviar WhatsApp a cada contacto
@@ -77,7 +77,7 @@ async def enviar_mensaje_whatsapp(
                     ]
                 )
                 
-                bq_client.query(insert_query, job_config=job_config_insert).result()
+                get_bq_client().query(insert_query, job_config=job_config_insert).result()
                 
                 mensajes_enviados.append({
                     'mensaje_id': mensaje_id,
@@ -138,7 +138,7 @@ async def get_mensajes_recibidos(user: dict = Depends(verify_firebase_token)):
             ]
         )
         
-        query_job = bq_client.query(query, job_config=job_config)
+        query_job = get_bq_client().query(query, job_config=job_config)
         results = list(query_job.result())
         
         mensajes = []

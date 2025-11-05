@@ -17,6 +17,17 @@ def set_bq_client(client):
     bq_client = client
 
 
+def get_bq_client():
+    """Obtiene el cliente de BigQuery. Lanza error si no está inicializado."""
+    global bq_client
+    if bq_client is None:
+        raise HTTPException(
+            status_code=500,
+            detail="BigQuery client no está inicializado. Verifique las credenciales."
+        )
+    return bq_client
+
+
 async def verify_firebase_token(authorization: Optional[str] = Header(None)) -> dict:
     """
     Valida el token de Firebase y retorna los datos del usuario CON PERMISOS.
@@ -64,7 +75,7 @@ async def verify_firebase_token(authorization: Optional[str] = Header(None)) -> 
                 ]
             )
             
-            query_job = bq_client.query(check_query, job_config=job_config)
+            query_job = get_bq_client().query(check_query, job_config=job_config)
             results = list(query_job.result())
             
             if not results:
@@ -90,7 +101,7 @@ async def verify_firebase_token(authorization: Optional[str] = Header(None)) -> 
                 ]
             )
             
-            bq_client.query(update_query, job_config=job_config_update).result()
+            get_bq_client().query(update_query, job_config=job_config_update).result()
         
         except HTTPException:
             raise

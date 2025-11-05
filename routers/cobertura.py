@@ -4,7 +4,7 @@ Endpoints de cobertura - Instantánea e histórica
 from fastapi import APIRouter, HTTPException, Depends
 from google.cloud import bigquery
 from datetime import timedelta
-from dependencies import verify_firebase_token, verificar_permiso_cobertura, bq_client
+from dependencies import verify_firebase_token, verificar_permiso_cobertura, get_bq_client
 from config import (
     PROJECT_ID, DATASET_REPORTES, DATASET_APP,
     TABLE_COBERTURA, TABLE_HISTORICO, TABLE_USUARIO_INST,
@@ -62,7 +62,7 @@ async def get_cobertura_general(user: dict = Depends(verificar_permiso_cobertura
             ]
         )
         
-        query_job = bq_client.query(query, job_config=job_config)
+        query_job = get_bq_client().query(query, job_config=job_config)
         results = list(query_job.result())
         
         if not results or results[0].total_turnos_activos == 0:
@@ -163,7 +163,7 @@ async def get_cobertura_por_instalacion(user: dict = Depends(verificar_permiso_c
             job_timeout_ms=300000,  # 5 minutos
         )
         
-        query_job = bq_client.query(query, job_config=job_config)
+        query_job = get_bq_client().query(query, job_config=job_config)
         results = query_job.result()
         
         instalaciones = []
@@ -257,7 +257,7 @@ async def get_cobertura_por_instalacion_fast(user: dict = Depends(verify_firebas
             job_timeout_ms=120000,  # 2 minutos
         )
         
-        query_job = bq_client.query(query, job_config=job_config)
+        query_job = get_bq_client().query(query, job_config=job_config)
         results = query_job.result()
         
         instalaciones = []
@@ -348,7 +348,7 @@ async def get_cobertura_por_instalacion_fast_v2(user: dict = Depends(verify_fire
             job_timeout_ms=120000,  # 2 minutos
         )
         
-        query_job = bq_client.query(query, job_config=job_config)
+        query_job = get_bq_client().query(query, job_config=job_config)
         results = query_job.result()
         
         instalaciones = []
@@ -464,8 +464,8 @@ async def get_detalle_todas_instalaciones(
         )
         
         # Ejecutar ambas consultas en paralelo
-        query_job_turnos = bq_client.query(query_turnos, job_config=job_config)
-        query_job_ppc = bq_client.query(query_ppc, job_config=job_config)
+        query_job_turnos = get_bq_client().query(query_turnos, job_config=job_config)
+        query_job_ppc = get_bq_client().query(query_ppc, job_config=job_config)
         
         results_turnos = list(query_job_turnos.result())
         results_ppc_list = list(query_job_ppc.result())
@@ -603,7 +603,7 @@ async def get_detalle_instalacion(
             ]
         )
         
-        query_job = bq_client.query(query, job_config=job_config)
+        query_job = get_bq_client().query(query, job_config=job_config)
         results = query_job.result()
         
         turnos = []
@@ -693,7 +693,7 @@ async def get_cobertura_historica_semanal(
             ]
         )
         
-        query_job = bq_client.query(query, job_config=job_config)
+        query_job = get_bq_client().query(query, job_config=job_config)
         results = query_job.result()
         
         semanas = []
@@ -782,7 +782,7 @@ async def get_cobertura_historica_por_instalacion(
             ]
         )
         
-        query_job = bq_client.query(query, job_config=job_config)
+        query_job = get_bq_client().query(query, job_config=job_config)
         results = query_job.result()
         
         datos = []
