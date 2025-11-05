@@ -161,7 +161,8 @@ async def get_usuarios_wfsa_instalacion(
             """
             debug_job1 = get_bq_client().query(debug_query1, job_config=job_config)
             debug_result1 = list(debug_job1.result())
-            print(f"[DEBUG] Registros en instalacion_contacto para '{instalacion_rol}': {debug_result1[0].total if debug_result1 else 0}")
+            total_ic = debug_result1[0].total if debug_result1 else 0
+            print(f"[DEBUG] Registros en instalacion_contacto para '{instalacion_rol}': {total_ic}")
             
             # Verificar si hay clientes en usuario_instalaciones
             debug_query2 = f"""
@@ -171,7 +172,61 @@ async def get_usuarios_wfsa_instalacion(
             """
             debug_job2 = get_bq_client().query(debug_query2, job_config=job_config)
             debug_result2 = list(debug_job2.result())
-            print(f"[DEBUG] Registros en usuario_instalaciones para '{instalacion_rol}': {debug_result2[0].total if debug_result2 else 0}")
+            total_ui = debug_result2[0].total if debug_result2 else 0
+            print(f"[DEBUG] Registros en usuario_instalaciones para '{instalacion_rol}': {total_ui}")
+            
+            # Verificar si hay usuarios WFSA en usuario_contactos relacionados
+            if total_ic > 0:
+                debug_query3 = f"""
+                SELECT COUNT(DISTINCT uc.email_login) as total
+                FROM `{TABLE_INST_CONTACTO}` ic
+                JOIN `{TABLE_USUARIO_CONTACTOS}` uc 
+                  ON ic.contacto_id = uc.contacto_id 
+                  AND ic.instalacion_rol = uc.instalacion_rol
+                WHERE ic.instalacion_rol = @instalacion_rol
+                """
+                debug_job3 = get_bq_client().query(debug_query3, job_config=job_config)
+                debug_result3 = list(debug_job3.result())
+                total_uc = debug_result3[0].total if debug_result3 else 0
+                print(f"[DEBUG] Usuarios en usuario_contactos relacionados: {total_uc}")
+                
+                # Verificar cuántos tienen firebase_uid y están activos
+                debug_query4 = f"""
+                SELECT COUNT(DISTINCT u.email_login) as total
+                FROM `{TABLE_INST_CONTACTO}` ic
+                JOIN `{TABLE_USUARIO_CONTACTOS}` uc 
+                  ON ic.contacto_id = uc.contacto_id 
+                  AND ic.instalacion_rol = uc.instalacion_rol
+                JOIN `{PROJECT_ID}.{DATASET_APP}.v_permisos_usuarios` u 
+                  ON uc.email_login = u.email_login
+                WHERE ic.instalacion_rol = @instalacion_rol
+                  AND u.rol_id != 'CLIENTE'
+                  AND u.usuario_activo = TRUE
+                  AND u.firebase_uid IS NOT NULL
+                  AND u.firebase_uid != ''
+                """
+                debug_job4 = get_bq_client().query(debug_query4, job_config=job_config)
+                debug_result4 = list(debug_job4.result())
+                total_wfsa_valid = debug_result4[0].total if debug_result4 else 0
+                print(f"[DEBUG] Usuarios WFSA válidos (con firebase_uid): {total_wfsa_valid}")
+            
+            # Verificar clientes con firebase_uid
+            if total_ui > 0:
+                debug_query5 = f"""
+                SELECT COUNT(DISTINCT u.email_login) as total
+                FROM `{TABLE_USUARIO_INST}` ui
+                JOIN `{PROJECT_ID}.{DATASET_APP}.v_permisos_usuarios` u
+                  ON ui.email_login = u.email_login
+                WHERE ui.instalacion_rol = @instalacion_rol
+                  AND u.rol_id = 'CLIENTE'
+                  AND u.usuario_activo = TRUE
+                  AND u.firebase_uid IS NOT NULL
+                  AND u.firebase_uid != ''
+                """
+                debug_job5 = get_bq_client().query(debug_query5, job_config=job_config)
+                debug_result5 = list(debug_job5.result())
+                total_clientes_valid = debug_result5[0].total if debug_result5 else 0
+                print(f"[DEBUG] Clientes válidos (con firebase_uid): {total_clientes_valid}")
         
         usuarios = []
         for row in results:
