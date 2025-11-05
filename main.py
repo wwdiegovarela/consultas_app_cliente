@@ -503,10 +503,11 @@ async def get_cobertura_por_instalacion(user: dict = Depends(verificar_permiso_c
 @app.get("/api/cobertura/instantanea/por-instalacion-fast")
 async def get_cobertura_por_instalacion_fast(user: dict = Depends(verify_firebase_token)):
     """
-    Versión optimizada del endpoint de instalaciones.
+    Versión optimizada del endpoint de instalaciones (v1 - Legacy).
     - Elimina subqueries
     - Usa JOINs optimizados
     - Incluye caché de BigQuery
+    - NO incluye tipo_de_servicio (para compatibilidad con apps antiguas)
     """
     user_email = user["email"]
     
@@ -596,6 +597,100 @@ async def get_cobertura_por_instalacion_fast(user: dict = Depends(verify_firebas
         raise HTTPException(status_code=500, detail=f"Error al consultar BigQuery: {str(e)}")
 
 
+@app.get("/api/cobertura/instantanea/por-instalacion-fast/v2")
+async def get_cobertura_por_instalacion_fast_v2(user: dict = Depends(verify_firebase_token)):
+    """
+    Versión v2 del endpoint optimizado con soporte para tipo_de_servicio.
+    - Incluye el campo tipo_de_servicio
+    - Puede retornar múltiples filas por instalación (una por cada tipo_de_servicio)
+    - Mantiene compatibilidad con el frontend que agrupa por instalacion_rol
+    """
+    user_email = user["email"]
+    
+    try:
+        query = f"""
+        SELECT 
+          ci.instalacion_rol,
+          ci.zona,
+          ci.cliente_rol,
+          ci.tipo_de_servicio,
+          
+          -- Contadores básicos (agrupados por tipo_de_servicio)
+          COUNT(*) AS total_guardias_requeridos,
+          SUM(CASE WHEN ci.asistencia = 1 THEN 1 ELSE 0 END) AS guardias_presentes,
+          COUNT(*) - SUM(CASE WHEN ci.asistencia = 1 THEN 1 ELSE 0 END) AS guardias_ausentes,
+          
+          -- Porcentaje de Cobertura (solo para mostrar, no usado para cálculo general)
+          ROUND(SAFE_DIVIDE(
+            SUM(CASE WHEN ci.asistencia = 1 THEN 1 ELSE 0 END),
+            COUNT(*)
+          ) * 100, 1) AS porcentaje_cobertura,
+          
+          -- PPC desde JOIN optimizado (suma total por instalación, no por tipo)
+          COALESCE(ppc.cantidad_ppc, 0) AS cantidad_ppc_total,
+          
+          -- FaceID básico
+          CASE WHEN faceid.nombre IS NOT NULL THEN TRUE ELSE FALSE END AS tiene_faceid
+
+        FROM `{TABLE_COBERTURA}` ci
+        INNER JOIN `{TABLE_USUARIO_INST}` ui 
+          ON ci.cliente_rol = ui.cliente_rol 
+          AND ci.instalacion_rol = ui.instalacion_rol
+        LEFT JOIN `{PROJECT_ID}.{DATASET_REPORTES}.cr_equipos_faceid` faceid
+          ON ci.instalacion_rol = faceid.nombre
+        LEFT JOIN (
+          -- Subconsulta optimizada para contar PPC por instalación
+          SELECT instalacion_rol, COUNT(*) AS cantidad_ppc
+          FROM `{PROJECT_ID}.cr_vistas_reporte.cr_ppc_dia`
+          GROUP BY instalacion_rol
+        ) ppc ON ci.instalacion_rol = ppc.instalacion_rol
+        WHERE ui.email_login = @user_email
+          AND ui.puede_ver = TRUE
+        GROUP BY ci.instalacion_rol, ci.zona, ci.cliente_rol, ci.tipo_de_servicio, faceid.nombre, ppc.cantidad_ppc
+        ORDER BY ci.instalacion_rol, ci.tipo_de_servicio, guardias_ausentes DESC
+        """
+        
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("user_email", "STRING", user_email)
+            ],
+            use_query_cache=True,
+            use_legacy_sql=False,
+            job_timeout_ms=120000,  # 2 minutos
+        )
+        
+        query_job = bq_client.query(query, job_config=job_config)
+        results = query_job.result()
+        
+        instalaciones = []
+        for row in results:
+            porcentaje = float(row.porcentaje_cobertura) if row.porcentaje_cobertura else 0
+            
+            instalaciones.append({
+                "instalacion_rol": row.instalacion_rol,
+                "zona": row.zona,
+                "cliente_rol": row.cliente_rol,
+                "tipo_de_servicio": row.tipo_de_servicio if row.tipo_de_servicio else "1 Servicio",  # Default si es NULL
+                "total_guardias_requeridos": row.total_guardias_requeridos,
+                "guardias_presentes": row.guardias_presentes,
+                "guardias_ausentes": row.guardias_ausentes,
+                "porcentaje_cobertura": porcentaje,
+                "estado_semaforo": calcular_estado_semaforo(porcentaje),
+                "ppc": row.cantidad_ppc_total,
+                "tiene_faceid": bool(row.tiene_faceid),
+            })
+        
+        return {
+            "total_instalaciones": len(instalaciones),
+            "instalaciones": instalaciones,
+            "version": "v2",
+            "optimized": True
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al consultar BigQuery: {str(e)}")
+
+
 @app.get("/api/cobertura/instantanea/detalle-todas")
 async def get_detalle_todas_instalaciones(
     user: dict = Depends(verificar_permiso_cobertura)
@@ -631,6 +726,7 @@ async def get_detalle_todas_instalaciones(
           ci.tvf as turno_extra,
           
           ci.tipo,
+          ci.tipo_de_servicio,
           ci.motivoppc as motivo_incumplimiento,
          -- ci.tipo_de_servicio as tipo_de_servicio,
           -- Indicador de retraso (si asistió)
@@ -716,6 +812,7 @@ async def get_detalle_todas_instalaciones(
                 "turno_extra": row.turno_extra,
 
                 "tipo": row.tipo,
+                "tipo_de_servicio": row.tipo_de_servicio if hasattr(row, 'tipo_de_servicio') and row.tipo_de_servicio else (row.tipo if hasattr(row, 'tipo') and row.tipo else "1 Servicio"),
                 "motivo_incumplimiento": row.motivo_incumplimiento,
                 "puntualidad": row.puntualidad
             })
