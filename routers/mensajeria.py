@@ -4,7 +4,7 @@ Endpoints para el módulo de mensajería (chat)
 from fastapi import APIRouter, HTTPException, Depends
 from google.cloud import bigquery
 from dependencies import verify_firebase_token, get_bq_client
-from config import PROJECT_ID, DATASET_APP, TABLE_USUARIO_INST, TABLE_INST_CONTACTO, TABLE_USUARIO_CONTACTOS
+from config import PROJECT_ID, DATASET_APP, TABLE_USUARIO_INST, TABLE_INST_CONTACTO, TABLE_USUARIO_CONTACTOS, TABLE_CONTACTOS
 
 router = APIRouter()
 
@@ -97,8 +97,8 @@ async def get_usuarios_wfsa_instalacion(
     """
     try:
         query = f"""
-        -- Usuarios WFSA desde instalacion_contacto (intentar con usuario_contactos)
-        -- Si no hay resultados, usar usuario_instalaciones como fallback
+        -- Usuarios WFSA desde instalacion_contacto usando tabla contactos
+        -- instalacion_contacto -> contactos (contacto_id) -> v_permisos_usuarios (email_usuario_app)
         WITH usuarios_wfsa_ic AS (
           SELECT DISTINCT
             u.email_login,
@@ -106,14 +106,15 @@ async def get_usuarios_wfsa_instalacion(
             u.nombre_completo,
             u.rol_id
           FROM `{TABLE_INST_CONTACTO}` ic
-          JOIN `{TABLE_USUARIO_CONTACTOS}` uc 
-            ON ic.contacto_id = uc.contacto_id 
-            AND ic.instalacion_rol = uc.instalacion_rol
+          JOIN `{TABLE_CONTACTOS}` c
+            ON ic.contacto_id = c.contacto_id
           JOIN `{PROJECT_ID}.{DATASET_APP}.v_permisos_usuarios` u 
-            ON uc.email_login = u.email_login
+            ON c.email_usuario_app = u.email_login
           WHERE ic.instalacion_rol = @instalacion_rol
             AND u.rol_id != 'CLIENTE'  -- Solo usuarios WFSA
             AND u.usuario_activo = TRUE
+            AND c.activo = TRUE  -- Solo contactos activos
+            AND c.es_usuario_app = TRUE  -- Solo contactos que son usuarios de la app
         ),
         -- Usuarios WFSA desde usuario_instalaciones (fallback si instalacion_contacto no funciona)
         usuarios_wfsa_ui AS (
@@ -181,47 +182,49 @@ async def get_usuarios_wfsa_instalacion(
             if diag_results1a:
                 for row in diag_results1a[:3]:
                     print(f"  - contacto_id: {row.contacto_id}, cliente_rol: {row.cliente_rol}")
-                    # Verificar si este contacto_id existe en usuario_contactos
+                    # Verificar si este contacto_id existe en contactos
                     diag_query1b = f"""
-                    SELECT COUNT(*) as total
-                    FROM `{TABLE_USUARIO_CONTACTOS}`
+                    SELECT contacto_id, email_usuario_app, activo, es_usuario_app
+                    FROM `{TABLE_CONTACTOS}`
                     WHERE contacto_id = @contacto_id
-                      AND instalacion_rol = @instalacion_rol
+                    LIMIT 1
                     """
                     diag_job_config1b = bigquery.QueryJobConfig(
                         query_parameters=[
-                            bigquery.ScalarQueryParameter("contacto_id", "STRING", row.contacto_id),
-                            bigquery.ScalarQueryParameter("instalacion_rol", "STRING", instalacion_rol)
+                            bigquery.ScalarQueryParameter("contacto_id", "STRING", row.contacto_id)
                         ]
                     )
                     diag_job1b = get_bq_client().query(diag_query1b, diag_job_config1b)
                     diag_results1b = list(diag_job1b.result())
-                    count_uc = diag_results1b[0].total if diag_results1b else 0
-                    print(f"    -> Existe en usuario_contactos: {count_uc} registros")
+                    if diag_results1b:
+                        print(f"    -> Existe en contactos: email_usuario_app={diag_results1b[0].email_usuario_app}, activo={diag_results1b[0].activo}, es_usuario_app={diag_results1b[0].es_usuario_app}")
+                    else:
+                        print(f"    -> NO existe en contactos")
             
-            # Query 2: Verificar usuarios en usuario_contactos relacionados con instalacion_contacto
+            # Query 2: Verificar usuarios en contactos relacionados con instalacion_contacto
             diag_query2 = f"""
             SELECT DISTINCT
-              uc.email_login,
+              c.email_usuario_app,
               ic.contacto_id,
               ic.instalacion_rol
             FROM `{TABLE_INST_CONTACTO}` ic
-            LEFT JOIN `{TABLE_USUARIO_CONTACTOS}` uc 
-              ON ic.contacto_id = uc.contacto_id 
-              AND ic.instalacion_rol = uc.instalacion_rol
+            LEFT JOIN `{TABLE_CONTACTOS}` c
+              ON ic.contacto_id = c.contacto_id
             WHERE ic.instalacion_rol = @instalacion_rol
+              AND c.activo = TRUE
+              AND c.es_usuario_app = TRUE
             LIMIT 10
             """
             diag_job2 = get_bq_client().query(diag_query2, job_config=job_config)
             diag_results2 = list(diag_job2.result())
-            print(f"[DEBUG] JOIN instalacion_contacto -> usuario_contactos: {len(diag_results2)} filas")
+            print(f"[DEBUG] JOIN instalacion_contacto -> contactos: {len(diag_results2)} filas")
             if diag_results2:
                 for row in diag_results2[:3]:
-                    print(f"  - contacto_id: {row.contacto_id}, email: {row.email_login}")
+                    print(f"  - contacto_id: {row.contacto_id}, email_usuario_app: {row.email_usuario_app}")
             
             # Query 3: Verificar si esos emails existen en v_permisos_usuarios
-            if diag_results2 and diag_results2[0].email_login:
-                sample_email = diag_results2[0].email_login
+            if diag_results2 and diag_results2[0].email_usuario_app:
+                sample_email = diag_results2[0].email_usuario_app
                 diag_query3 = f"""
                 SELECT email_login, rol_id, usuario_activo, firebase_uid
                 FROM `{PROJECT_ID}.{DATASET_APP}.v_permisos_usuarios`
@@ -243,12 +246,13 @@ async def get_usuarios_wfsa_instalacion(
                 else:
                     print(f"[DEBUG] Usuario '{sample_email}' NO encontrado en v_permisos_usuarios")
             else:
-                print(f"[DEBUG] ⚠️ PROBLEMA DETECTADO: No hay usuarios en usuario_contactos para esta instalación")
-                print(f"[DEBUG] Esto significa que los contacto_id en instalacion_contacto no tienen correspondencia en usuario_contactos")
+                print(f"[DEBUG] ⚠️ PROBLEMA DETECTADO: No hay usuarios en contactos para esta instalación")
+                print(f"[DEBUG] Esto significa que los contacto_id en instalacion_contacto no tienen correspondencia en contactos")
                 print(f"[DEBUG] Posibles causas:")
-                print(f"  1. Los contacto_id no están asociados a usuarios en usuario_contactos")
-                print(f"  2. Los instalacion_rol no coinciden exactamente (espacios, mayúsculas, etc.)")
-                print(f"  3. La estructura de datos es diferente a la esperada")
+                print(f"  1. Los contacto_id no existen en la tabla contactos")
+                print(f"  2. Los contactos no tienen es_usuario_app = TRUE")
+                print(f"  3. Los contactos no están activos (activo = FALSE)")
+                print(f"  4. Los contactos no tienen email_usuario_app asignado")
         
         # Si no hay resultados, intentar queries de debug
         if len(results) == 0:
@@ -274,33 +278,35 @@ async def get_usuarios_wfsa_instalacion(
             total_ui = debug_result2[0].total if debug_result2 else 0
             print(f"[DEBUG] Registros en usuario_instalaciones para '{instalacion_rol}': {total_ui}")
             
-            # Verificar si hay usuarios WFSA en usuario_contactos relacionados
+            # Verificar si hay usuarios WFSA en contactos relacionados
             if total_ic > 0:
                 debug_query3 = f"""
-                SELECT COUNT(DISTINCT uc.email_login) as total
+                SELECT COUNT(DISTINCT c.email_usuario_app) as total
                 FROM `{TABLE_INST_CONTACTO}` ic
-                JOIN `{TABLE_USUARIO_CONTACTOS}` uc 
-                  ON ic.contacto_id = uc.contacto_id 
-                  AND ic.instalacion_rol = uc.instalacion_rol
+                JOIN `{TABLE_CONTACTOS}` c
+                  ON ic.contacto_id = c.contacto_id
                 WHERE ic.instalacion_rol = @instalacion_rol
+                  AND c.activo = TRUE
+                  AND c.es_usuario_app = TRUE
                 """
                 debug_job3 = get_bq_client().query(debug_query3, job_config=job_config)
                 debug_result3 = list(debug_job3.result())
-                total_uc = debug_result3[0].total if debug_result3 else 0
-                print(f"[DEBUG] Usuarios en usuario_contactos relacionados: {total_uc}")
+                total_contactos = debug_result3[0].total if debug_result3 else 0
+                print(f"[DEBUG] Usuarios en contactos relacionados: {total_contactos}")
                 
                 # Verificar cuántos tienen firebase_uid y están activos
                 debug_query4 = f"""
                 SELECT COUNT(DISTINCT u.email_login) as total
                 FROM `{TABLE_INST_CONTACTO}` ic
-                JOIN `{TABLE_USUARIO_CONTACTOS}` uc 
-                  ON ic.contacto_id = uc.contacto_id 
-                  AND ic.instalacion_rol = uc.instalacion_rol
+                JOIN `{TABLE_CONTACTOS}` c
+                  ON ic.contacto_id = c.contacto_id
                 JOIN `{PROJECT_ID}.{DATASET_APP}.v_permisos_usuarios` u 
-                  ON uc.email_login = u.email_login
+                  ON c.email_usuario_app = u.email_login
                 WHERE ic.instalacion_rol = @instalacion_rol
                   AND u.rol_id != 'CLIENTE'
                   AND u.usuario_activo = TRUE
+                  AND c.activo = TRUE
+                  AND c.es_usuario_app = TRUE
                   AND u.firebase_uid IS NOT NULL
                   AND u.firebase_uid != ''
                 """
