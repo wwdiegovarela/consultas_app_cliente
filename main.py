@@ -48,7 +48,7 @@ try:
     bq_client = bigquery.Client()
     set_bq_client(bq_client)  # Pasar el cliente a dependencies
     print("[OK] BigQuery client inicializado correctamente")
-        except Exception as e:
+except Exception as e:
     print(f"[ERROR] Error inicializando BigQuery client: {e}")
     bq_client = None
 
