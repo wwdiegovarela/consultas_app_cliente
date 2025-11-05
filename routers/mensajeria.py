@@ -146,7 +146,32 @@ async def get_usuarios_wfsa_instalacion(
         )
         
         query_job = get_bq_client().query(query, job_config=job_config)
-        results = query_job.result()
+        results = list(query_job.result())
+        
+        print(f"[DEBUG] Query ejecutada para instalacion_rol: {instalacion_rol}")
+        print(f"[DEBUG] Resultados encontrados: {len(results)}")
+        
+        # Si no hay resultados, intentar queries de debug
+        if len(results) == 0:
+            # Verificar si la instalación existe en instalacion_contacto
+            debug_query1 = f"""
+            SELECT COUNT(*) as total
+            FROM `{TABLE_INST_CONTACTO}`
+            WHERE instalacion_rol = @instalacion_rol
+            """
+            debug_job1 = get_bq_client().query(debug_query1, job_config=job_config)
+            debug_result1 = list(debug_job1.result())
+            print(f"[DEBUG] Registros en instalacion_contacto para '{instalacion_rol}': {debug_result1[0].total if debug_result1 else 0}")
+            
+            # Verificar si hay clientes en usuario_instalaciones
+            debug_query2 = f"""
+            SELECT COUNT(*) as total
+            FROM `{TABLE_USUARIO_INST}`
+            WHERE instalacion_rol = @instalacion_rol
+            """
+            debug_job2 = get_bq_client().query(debug_query2, job_config=job_config)
+            debug_result2 = list(debug_job2.result())
+            print(f"[DEBUG] Registros en usuario_instalaciones para '{instalacion_rol}': {debug_result2[0].total if debug_result2 else 0}")
         
         usuarios = []
         for row in results:
