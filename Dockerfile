@@ -10,8 +10,13 @@ COPY requirements.txt .
 # Instalar dependencias
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copiar código de la aplicación
+# Copiar código de la aplicación (modular)
 COPY main.py .
+COPY config.py .
+COPY dependencies.py .
+COPY models/ ./models/
+COPY routers/ ./routers/
+COPY utils/ ./utils/
 
 # Exponer puerto
 EXPOSE 8080
