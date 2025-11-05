@@ -36,3 +36,7 @@ class RespuestaEncuestaRequest(BaseModel):
 class FCMTokenRequest(BaseModel):
     fcm_token: str
 
+
+class InstalacionesRequest(BaseModel):
+    instalaciones: List[str]  # Lista de instalacion_rol
+

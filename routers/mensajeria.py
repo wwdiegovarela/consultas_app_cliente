@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from google.cloud import bigquery
 from dependencies import verify_firebase_token, get_bq_client
 from config import PROJECT_ID, DATASET_APP, TABLE_USUARIO_INST, TABLE_INST_CONTACTO, TABLE_USUARIO_CONTACTOS, TABLE_CONTACTOS
+from models.schemas import InstalacionesRequest
 
 router = APIRouter()
 
@@ -336,6 +337,105 @@ async def get_usuarios_wfsa_instalacion(
         if usuarios_sin_uid:
             print(f"[WARNING] {len(usuarios_sin_uid)} usuarios encontrados sin firebase_uid (no incluidos): {', '.join(usuarios_sin_uid[:5])}")
             print(f"[INFO] Ejecuta el script de sincronización para asignar firebase_uid a estos usuarios")
+        
+        return {
+            "usuarios": usuarios
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al consultar BigQuery: {str(e)}")
+
+
+@router.post("/api/usuarios-wfsa/instalaciones")
+async def get_usuarios_wfsa_multiples_instalaciones(
+    request: InstalacionesRequest,
+    user: dict = Depends(verify_firebase_token)
+):
+    """
+    Obtiene todos los participantes de múltiples instalaciones en una sola query.
+    Optimizado para cuando el usuario selecciona varias instalaciones.
+    
+    Retorna usuarios únicos (sin duplicados) de todas las instalaciones:
+    1. Todos los usuarios WFSA de instalacion_contacto
+    2. Todos los clientes asociados desde usuario_instalaciones
+    """
+    if not request.instalaciones:
+        return {"usuarios": []}
+    
+    try:
+        # Construir la lista de parámetros para la query
+        instalaciones_list = request.instalaciones
+        
+        query = f"""
+        -- Usuarios WFSA desde instalacion_contacto usando tabla contactos
+        -- Para múltiples instalaciones en una sola query
+        WITH usuarios_wfsa AS (
+          SELECT DISTINCT
+            u.email_login,
+            u.firebase_uid,
+            u.nombre_completo,
+            u.rol_id
+          FROM `{TABLE_INST_CONTACTO}` ic
+          JOIN `{TABLE_CONTACTOS}` c
+            ON ic.contacto_id = c.contacto_id
+          JOIN `{PROJECT_ID}.{DATASET_APP}.v_permisos_usuarios` u 
+            ON c.email_usuario_app = u.email_login
+          WHERE ic.instalacion_rol IN UNNEST(@instalaciones)
+            AND u.rol_id != 'CLIENTE'  -- Solo usuarios WFSA
+            AND u.usuario_activo = TRUE
+            AND c.activo = TRUE  -- Solo contactos activos
+            AND c.es_usuario_app = TRUE  -- Solo contactos que son usuarios de la app
+        ),
+        -- Clientes desde usuario_instalaciones
+        clientes_instalacion AS (
+          SELECT DISTINCT
+            u.email_login,
+            u.firebase_uid,
+            u.nombre_completo,
+            u.rol_id
+          FROM `{TABLE_USUARIO_INST}` ui
+          JOIN `{PROJECT_ID}.{DATASET_APP}.v_permisos_usuarios` u
+            ON ui.email_login = u.email_login
+          WHERE ui.instalacion_rol IN UNNEST(@instalaciones)
+            AND u.rol_id = 'CLIENTE'  -- Solo clientes
+            AND u.usuario_activo = TRUE
+        )
+        -- Combinar resultados y eliminar duplicados
+        SELECT * FROM usuarios_wfsa
+        UNION DISTINCT
+        SELECT * FROM clientes_instalacion
+        ORDER BY nombre_completo
+        """
+        
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ArrayQueryParameter("instalaciones", "STRING", instalaciones_list)
+            ]
+        )
+        
+        query_job = get_bq_client().query(query, job_config=job_config)
+        results = list(query_job.result())
+        
+        print(f"[DEBUG] Query ejecutada para {len(instalaciones_list)} instalaciones")
+        print(f"[DEBUG] Resultados encontrados: {len(results)}")
+        
+        usuarios = []
+        usuarios_sin_uid = []
+        for row in results:
+            usuario_data = {
+                "email_login": row.email_login,
+                "firebase_uid": row.firebase_uid,
+                "nombre_completo": row.nombre_completo,
+                "rol_id": row.rol_id
+            }
+            # Solo incluir si tiene firebase_uid (requerido para Firestore)
+            if row.firebase_uid and row.firebase_uid.strip():
+                usuarios.append(usuario_data)
+            else:
+                usuarios_sin_uid.append(row.email_login)
+        
+        if usuarios_sin_uid:
+            print(f"[WARNING] {len(usuarios_sin_uid)} usuarios encontrados sin firebase_uid (no incluidos): {', '.join(usuarios_sin_uid[:5])}")
         
         return {
             "usuarios": usuarios
