@@ -99,7 +99,7 @@ async def get_usuarios_wfsa_instalacion(
         query = f"""
         -- Usuarios WFSA desde instalacion_contacto usando tabla contactos
         -- instalacion_contacto -> contactos (contacto_id) -> v_permisos_usuarios (email_usuario_app)
-        -- IMPORTANTE: Solo usuarios WFSA que están en la tabla contactos
+        -- IMPORTANTE: Solo usuarios WFSA que están explícitamente en instalacion_contacto
         WITH usuarios_wfsa AS (
           SELECT DISTINCT
             u.email_login,
@@ -131,7 +131,7 @@ async def get_usuarios_wfsa_instalacion(
             AND u.rol_id = 'CLIENTE'  -- Solo clientes
             AND u.usuario_activo = TRUE
         )
-        -- Combinar resultados (WFSA desde contactos + clientes desde usuario_instalaciones)
+        -- Combinar resultados (WFSA solo desde instalacion_contacto + clientes desde usuario_instalaciones)
         SELECT * FROM usuarios_wfsa
         UNION DISTINCT
         SELECT * FROM clientes_instalacion
