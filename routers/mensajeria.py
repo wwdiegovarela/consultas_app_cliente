@@ -98,6 +98,7 @@ async def get_usuarios_wfsa_instalacion(
     try:
         query = f"""
         -- Usuarios WFSA desde instalacion_contacto
+        -- TEMPORAL: Incluir usuarios sin firebase_uid para diagnóstico
         WITH usuarios_wfsa AS (
           SELECT DISTINCT
             u.email_login,
@@ -113,8 +114,9 @@ async def get_usuarios_wfsa_instalacion(
           WHERE ic.instalacion_rol = @instalacion_rol
             AND u.rol_id != 'CLIENTE'  -- Solo usuarios WFSA
             AND u.usuario_activo = TRUE
-            AND u.firebase_uid IS NOT NULL
-            AND u.firebase_uid != ''
+            -- TEMPORAL: Remover filtro de firebase_uid para diagnóstico
+            -- AND u.firebase_uid IS NOT NULL
+            -- AND u.firebase_uid != ''
         ),
         -- Clientes desde usuario_instalaciones
         clientes_instalacion AS (
@@ -129,8 +131,9 @@ async def get_usuarios_wfsa_instalacion(
           WHERE ui.instalacion_rol = @instalacion_rol
             AND u.rol_id = 'CLIENTE'  -- Solo clientes
             AND u.usuario_activo = TRUE
-            AND u.firebase_uid IS NOT NULL
-            AND u.firebase_uid != ''
+            -- TEMPORAL: Remover filtro de firebase_uid para diagnóstico
+            -- AND u.firebase_uid IS NOT NULL
+            -- AND u.firebase_uid != ''
         )
         -- Combinar ambos resultados
         SELECT * FROM usuarios_wfsa
@@ -229,13 +232,23 @@ async def get_usuarios_wfsa_instalacion(
                 print(f"[DEBUG] Clientes válidos (con firebase_uid): {total_clientes_valid}")
         
         usuarios = []
+        usuarios_sin_uid = []
         for row in results:
-            usuarios.append({
+            usuario_data = {
                 "email_login": row.email_login,
                 "firebase_uid": row.firebase_uid,
                 "nombre_completo": row.nombre_completo,
                 "rol_id": row.rol_id
-            })
+            }
+            # Solo incluir si tiene firebase_uid (requerido para Firestore)
+            if row.firebase_uid and row.firebase_uid.strip():
+                usuarios.append(usuario_data)
+            else:
+                usuarios_sin_uid.append(row.email_login)
+        
+        if usuarios_sin_uid:
+            print(f"[WARNING] {len(usuarios_sin_uid)} usuarios encontrados sin firebase_uid (no incluidos): {', '.join(usuarios_sin_uid[:5])}")
+            print(f"[INFO] Ejecuta el script de sincronización para asignar firebase_uid a estos usuarios")
         
         return {
             "usuarios": usuarios
