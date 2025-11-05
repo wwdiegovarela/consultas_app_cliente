@@ -15,9 +15,9 @@ async def get_contactos_usuario(
     user: dict = Depends(verify_firebase_token)
 ):
     """
-    Obtiene todos los contactos (clientes) que están asociados a las mismas instalaciones que el usuario.
+    Obtiene todos los contactos asociados a un usuario desde la tabla usuario_contactos.
     
-    Para el módulo de mensajería: retorna otros clientes que comparten instalaciones con el usuario.
+    Para usuarios CLIENTE: retorna todos los contactos asignados al usuario (pueden ser clientes o WFSA).
     """
     current_user_email = user["email"]
     
@@ -30,27 +30,29 @@ async def get_contactos_usuario(
     
     try:
         query = f"""
-        -- Obtener instalaciones del usuario
-        WITH instalaciones_usuario AS (
-          SELECT DISTINCT instalacion_rol
-          FROM `{TABLE_USUARIO_INST}`
-          WHERE email_login = @email_login
-        )
-        -- Obtener todos los contactos de esas instalaciones
+        -- Obtener contactos del usuario desde usuario_contactos
+        -- usuario_contactos relaciona: email_login (usuario) -> contacto_id -> instalacion_rol
+        -- Necesitamos encontrar qué otros usuarios tienen el mismo contacto_id
         SELECT DISTINCT
           u.email_login,
           u.firebase_uid,
           u.nombre_completo,
           u.rol_id,
           u.cliente_rol
-        FROM instalaciones_usuario iu
-        JOIN `{TABLE_USUARIO_INST}` ui
-          ON iu.instalacion_rol = ui.instalacion_rol
+        FROM `{TABLE_USUARIO_CONTACTOS}` uc_usuario
+        JOIN `{TABLE_INST_CONTACTO}` ic
+          ON uc_usuario.contacto_id = ic.contacto_id
+          AND uc_usuario.instalacion_rol = ic.instalacion_rol
+        JOIN `{TABLE_USUARIO_CONTACTOS}` uc_contacto
+          ON ic.contacto_id = uc_contacto.contacto_id
+          AND ic.instalacion_rol = uc_contacto.instalacion_rol
+          AND uc_contacto.email_login != @email_login  -- Excluir al usuario mismo
         JOIN `{PROJECT_ID}.{DATASET_APP}.v_permisos_usuarios` u
-          ON ui.email_login = u.email_login
-        WHERE u.rol_id = 'CLIENTE'
+          ON uc_contacto.email_login = u.email_login
+        WHERE uc_usuario.email_login = @email_login  -- Contactos asignados a este usuario
           AND u.usuario_activo = TRUE
-          AND u.email_login != @email_login  -- Excluir al usuario mismo
+          AND u.firebase_uid IS NOT NULL  -- Solo usuarios con firebase_uid
+          AND u.firebase_uid != ''
         ORDER BY u.nombre_completo
         """
         
@@ -87,27 +89,54 @@ async def get_usuarios_wfsa_instalacion(
     user: dict = Depends(verify_firebase_token)
 ):
     """
-    Obtiene los usuarios WFSA asociados a una instalación específica.
+    Obtiene todos los participantes de una instalación para usuarios WFSA.
     
-    Para el módulo de mensajería: retorna todos los usuarios WFSA que están asignados a una instalación.
+    Retorna:
+    1. Todos los usuarios WFSA de instalacion_contacto
+    2. Todos los clientes asociados a esa instalación desde usuario_instalaciones
     """
     try:
         query = f"""
-        SELECT 
-          u.email_login,
-          u.firebase_uid,
-          u.nombre_completo,
-          u.rol_id
-        FROM `{TABLE_INST_CONTACTO}` ic
-        JOIN `{TABLE_USUARIO_CONTACTOS}` uc 
-          ON ic.contacto_id = uc.contacto_id 
-          AND ic.instalacion_rol = uc.instalacion_rol
-        JOIN `{PROJECT_ID}.{DATASET_APP}.v_permisos_usuarios` u 
-          ON uc.email_login = u.email_login
-        WHERE ic.instalacion_rol = @instalacion_rol
-          AND u.rol_id != 'CLIENTE'  -- Solo usuarios WFSA
-          AND u.usuario_activo = TRUE  -- Solo usuarios activos
-        ORDER BY u.nombre_completo
+        -- Usuarios WFSA desde instalacion_contacto
+        WITH usuarios_wfsa AS (
+          SELECT DISTINCT
+            u.email_login,
+            u.firebase_uid,
+            u.nombre_completo,
+            u.rol_id
+          FROM `{TABLE_INST_CONTACTO}` ic
+          JOIN `{TABLE_USUARIO_CONTACTOS}` uc 
+            ON ic.contacto_id = uc.contacto_id 
+            AND ic.instalacion_rol = uc.instalacion_rol
+          JOIN `{PROJECT_ID}.{DATASET_APP}.v_permisos_usuarios` u 
+            ON uc.email_login = u.email_login
+          WHERE ic.instalacion_rol = @instalacion_rol
+            AND u.rol_id != 'CLIENTE'  -- Solo usuarios WFSA
+            AND u.usuario_activo = TRUE
+            AND u.firebase_uid IS NOT NULL
+            AND u.firebase_uid != ''
+        ),
+        -- Clientes desde usuario_instalaciones
+        clientes_instalacion AS (
+          SELECT DISTINCT
+            u.email_login,
+            u.firebase_uid,
+            u.nombre_completo,
+            u.rol_id
+          FROM `{TABLE_USUARIO_INST}` ui
+          JOIN `{PROJECT_ID}.{DATASET_APP}.v_permisos_usuarios` u
+            ON ui.email_login = u.email_login
+          WHERE ui.instalacion_rol = @instalacion_rol
+            AND u.rol_id = 'CLIENTE'  -- Solo clientes
+            AND u.usuario_activo = TRUE
+            AND u.firebase_uid IS NOT NULL
+            AND u.firebase_uid != ''
+        )
+        -- Combinar ambos resultados
+        SELECT * FROM usuarios_wfsa
+        UNION DISTINCT
+        SELECT * FROM clientes_instalacion
+        ORDER BY nombre_completo
         """
         
         job_config = bigquery.QueryJobConfig(
