@@ -97,9 +97,9 @@ async def get_usuarios_wfsa_instalacion(
     """
     try:
         query = f"""
-        -- Usuarios WFSA desde instalacion_contacto
-        -- TEMPORAL: Incluir usuarios sin firebase_uid para diagnóstico
-        WITH usuarios_wfsa AS (
+        -- Usuarios WFSA desde instalacion_contacto (intentar con usuario_contactos)
+        -- Si no hay resultados, usar usuario_instalaciones como fallback
+        WITH usuarios_wfsa_ic AS (
           SELECT DISTINCT
             u.email_login,
             u.firebase_uid,
@@ -114,9 +114,20 @@ async def get_usuarios_wfsa_instalacion(
           WHERE ic.instalacion_rol = @instalacion_rol
             AND u.rol_id != 'CLIENTE'  -- Solo usuarios WFSA
             AND u.usuario_activo = TRUE
-            -- TEMPORAL: Remover filtro de firebase_uid para diagnóstico
-            -- AND u.firebase_uid IS NOT NULL
-            -- AND u.firebase_uid != ''
+        ),
+        -- Usuarios WFSA desde usuario_instalaciones (fallback si instalacion_contacto no funciona)
+        usuarios_wfsa_ui AS (
+          SELECT DISTINCT
+            u.email_login,
+            u.firebase_uid,
+            u.nombre_completo,
+            u.rol_id
+          FROM `{TABLE_USUARIO_INST}` ui
+          JOIN `{PROJECT_ID}.{DATASET_APP}.v_permisos_usuarios` u
+            ON ui.email_login = u.email_login
+          WHERE ui.instalacion_rol = @instalacion_rol
+            AND u.rol_id != 'CLIENTE'  -- Solo usuarios WFSA
+            AND u.usuario_activo = TRUE
         ),
         -- Clientes desde usuario_instalaciones
         clientes_instalacion AS (
@@ -131,12 +142,11 @@ async def get_usuarios_wfsa_instalacion(
           WHERE ui.instalacion_rol = @instalacion_rol
             AND u.rol_id = 'CLIENTE'  -- Solo clientes
             AND u.usuario_activo = TRUE
-            -- TEMPORAL: Remover filtro de firebase_uid para diagnóstico
-            -- AND u.firebase_uid IS NOT NULL
-            -- AND u.firebase_uid != ''
         )
-        -- Combinar ambos resultados
-        SELECT * FROM usuarios_wfsa
+        -- Combinar todos los resultados (WFSA de ambas fuentes + clientes)
+        SELECT * FROM usuarios_wfsa_ic
+        UNION DISTINCT
+        SELECT * FROM usuarios_wfsa_ui
         UNION DISTINCT
         SELECT * FROM clientes_instalacion
         ORDER BY nombre_completo
@@ -158,8 +168,39 @@ async def get_usuarios_wfsa_instalacion(
         if len(results) == 0:
             print(f"[DEBUG] Ejecutando queries de diagnóstico...")
             
-            # Query 1: Verificar usuarios en usuario_contactos relacionados con instalacion_contacto
-            diag_query1 = f"""
+            # Query 1: Verificar qué hay en instalacion_contacto
+            diag_query1a = f"""
+            SELECT contacto_id, instalacion_rol, cliente_rol
+            FROM `{TABLE_INST_CONTACTO}`
+            WHERE instalacion_rol = @instalacion_rol
+            LIMIT 5
+            """
+            diag_job1a = get_bq_client().query(diag_query1a, job_config=job_config)
+            diag_results1a = list(diag_job1a.result())
+            print(f"[DEBUG] Registros en instalacion_contacto: {len(diag_results1a)}")
+            if diag_results1a:
+                for row in diag_results1a[:3]:
+                    print(f"  - contacto_id: {row.contacto_id}, cliente_rol: {row.cliente_rol}")
+                    # Verificar si este contacto_id existe en usuario_contactos
+                    diag_query1b = f"""
+                    SELECT COUNT(*) as total
+                    FROM `{TABLE_USUARIO_CONTACTOS}`
+                    WHERE contacto_id = @contacto_id
+                      AND instalacion_rol = @instalacion_rol
+                    """
+                    diag_job_config1b = bigquery.QueryJobConfig(
+                        query_parameters=[
+                            bigquery.ScalarQueryParameter("contacto_id", "STRING", row.contacto_id),
+                            bigquery.ScalarQueryParameter("instalacion_rol", "STRING", instalacion_rol)
+                        ]
+                    )
+                    diag_job1b = get_bq_client().query(diag_query1b, diag_job_config1b)
+                    diag_results1b = list(diag_job1b.result())
+                    count_uc = diag_results1b[0].total if diag_results1b else 0
+                    print(f"    -> Existe en usuario_contactos: {count_uc} registros")
+            
+            # Query 2: Verificar usuarios en usuario_contactos relacionados con instalacion_contacto
+            diag_query2 = f"""
             SELECT DISTINCT
               uc.email_login,
               ic.contacto_id,
@@ -171,36 +212,43 @@ async def get_usuarios_wfsa_instalacion(
             WHERE ic.instalacion_rol = @instalacion_rol
             LIMIT 10
             """
-            diag_job1 = get_bq_client().query(diag_query1, job_config=job_config)
-            diag_results1 = list(diag_job1.result())
-            print(f"[DEBUG] JOIN instalacion_contacto -> usuario_contactos: {len(diag_results1)} filas")
-            if diag_results1:
-                for row in diag_results1[:3]:
+            diag_job2 = get_bq_client().query(diag_query2, job_config=job_config)
+            diag_results2 = list(diag_job2.result())
+            print(f"[DEBUG] JOIN instalacion_contacto -> usuario_contactos: {len(diag_results2)} filas")
+            if diag_results2:
+                for row in diag_results2[:3]:
                     print(f"  - contacto_id: {row.contacto_id}, email: {row.email_login}")
             
-            # Query 2: Verificar si esos emails existen en v_permisos_usuarios
-            if diag_results1 and diag_results1[0].email_login:
-                sample_email = diag_results1[0].email_login
-                diag_query2 = f"""
+            # Query 3: Verificar si esos emails existen en v_permisos_usuarios
+            if diag_results2 and diag_results2[0].email_login:
+                sample_email = diag_results2[0].email_login
+                diag_query3 = f"""
                 SELECT email_login, rol_id, usuario_activo, firebase_uid
                 FROM `{PROJECT_ID}.{DATASET_APP}.v_permisos_usuarios`
                 WHERE email_login = @sample_email
                 LIMIT 1
                 """
-                diag_job_config2 = bigquery.QueryJobConfig(
+                diag_job_config3 = bigquery.QueryJobConfig(
                     query_parameters=[
                         bigquery.ScalarQueryParameter("sample_email", "STRING", sample_email)
                     ]
                 )
-                diag_job2 = get_bq_client().query(diag_query2, diag_job_config2)
-                diag_results2 = list(diag_job2.result())
-                if diag_results2:
+                diag_job3 = get_bq_client().query(diag_query3, diag_job_config3)
+                diag_results3 = list(diag_job3.result())
+                if diag_results3:
                     print(f"[DEBUG] Usuario '{sample_email}' en v_permisos_usuarios:")
-                    print(f"  - rol_id: {diag_results2[0].rol_id}")
-                    print(f"  - usuario_activo: {diag_results2[0].usuario_activo}")
-                    print(f"  - firebase_uid: {diag_results2[0].firebase_uid}")
+                    print(f"  - rol_id: {diag_results3[0].rol_id}")
+                    print(f"  - usuario_activo: {diag_results3[0].usuario_activo}")
+                    print(f"  - firebase_uid: {diag_results3[0].firebase_uid}")
                 else:
                     print(f"[DEBUG] Usuario '{sample_email}' NO encontrado en v_permisos_usuarios")
+            else:
+                print(f"[DEBUG] ⚠️ PROBLEMA DETECTADO: No hay usuarios en usuario_contactos para esta instalación")
+                print(f"[DEBUG] Esto significa que los contacto_id en instalacion_contacto no tienen correspondencia en usuario_contactos")
+                print(f"[DEBUG] Posibles causas:")
+                print(f"  1. Los contacto_id no están asociados a usuarios en usuario_contactos")
+                print(f"  2. Los instalacion_rol no coinciden exactamente (espacios, mayúsculas, etc.)")
+                print(f"  3. La estructura de datos es diferente a la esperada")
         
         # Si no hay resultados, intentar queries de debug
         if len(results) == 0:
