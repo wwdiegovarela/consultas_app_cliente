@@ -230,7 +230,9 @@ async def get_cobertura_por_instalacion_fast(user: dict = Depends(verify_firebas
           COALESCE(ppc.cantidad_ppc, 0) AS cantidad_ppc_total,
           
           -- FaceID básico
-          CASE WHEN faceid.nombre IS NOT NULL THEN TRUE ELSE FALSE END AS tiene_faceid
+          CASE WHEN faceid.nombre IS NOT NULL THEN TRUE ELSE FALSE END AS tiene_faceid,
+          faceid.numero AS faceid_numero,
+          faceid.ult_conexion AS faceid_ultima_conexion
         
         FROM `{TABLE_COBERTURA}` ci
         INNER JOIN `{TABLE_USUARIO_INST}` ui 
@@ -244,7 +246,7 @@ async def get_cobertura_por_instalacion_fast(user: dict = Depends(verify_firebas
         ) ppc ON ci.instalacion_rol = ppc.instalacion_rol
         WHERE ui.email_login = @user_email
           AND ui.puede_ver = TRUE
-        GROUP BY ci.instalacion_rol, ci.zona, ci.cliente_rol, faceid.nombre, ppc.cantidad_ppc
+        GROUP BY ci.instalacion_rol, ci.zona, ci.cliente_rol, faceid.nombre, faceid.numero, faceid.ult_conexion, ppc.cantidad_ppc
         ORDER BY guardias_ausentes DESC, porcentaje_cobertura ASC
         """
         
@@ -275,6 +277,8 @@ async def get_cobertura_por_instalacion_fast(user: dict = Depends(verify_firebas
                 "estado_semaforo": calcular_estado_semaforo(porcentaje),
                 "ppc": row.cantidad_ppc_total,
                 "tiene_faceid": bool(row.tiene_faceid),
+                "faceid_numero": row.faceid_numero if hasattr(row, "faceid_numero") else None,
+                "faceid_ultima_conexion": row.faceid_ultima_conexion.isoformat() if getattr(row, "faceid_ultima_conexion", None) else None,
             })
         
         return {
@@ -320,7 +324,9 @@ async def get_cobertura_por_instalacion_fast_v2(user: dict = Depends(verify_fire
           COALESCE(ppc.cantidad_ppc, 0) AS cantidad_ppc_total,
           
           -- FaceID básico
-          CASE WHEN faceid.nombre IS NOT NULL THEN TRUE ELSE FALSE END AS tiene_faceid
+          CASE WHEN faceid.nombre IS NOT NULL THEN TRUE ELSE FALSE END AS tiene_faceid,
+          faceid.numero AS faceid_numero,
+          faceid.ult_conexion AS faceid_ultima_conexion
 
         FROM `{TABLE_COBERTURA}` ci
         INNER JOIN `{TABLE_USUARIO_INST}` ui 
@@ -335,7 +341,7 @@ async def get_cobertura_por_instalacion_fast_v2(user: dict = Depends(verify_fire
         ) ppc ON ci.instalacion_rol = ppc.instalacion_rol
         WHERE ui.email_login = @user_email
           AND ui.puede_ver = TRUE
-        GROUP BY ci.instalacion_rol, ci.zona, ci.cliente_rol, ci.tipo_de_servicio, faceid.nombre, ppc.cantidad_ppc
+        GROUP BY ci.instalacion_rol, ci.zona, ci.cliente_rol, ci.tipo_de_servicio, faceid.nombre, faceid.numero, faceid.ult_conexion, ppc.cantidad_ppc
         ORDER BY ci.instalacion_rol, ci.tipo_de_servicio, guardias_ausentes DESC
         """
         
@@ -367,6 +373,8 @@ async def get_cobertura_por_instalacion_fast_v2(user: dict = Depends(verify_fire
                 "estado_semaforo": calcular_estado_semaforo(porcentaje),
                 "ppc": row.cantidad_ppc_total,
                 "tiene_faceid": bool(row.tiene_faceid),
+                "faceid_numero": row.faceid_numero if hasattr(row, "faceid_numero") else None,
+                "faceid_ultima_conexion": row.faceid_ultima_conexion.isoformat() if getattr(row, "faceid_ultima_conexion", None) else None,
             })
         
         return {
