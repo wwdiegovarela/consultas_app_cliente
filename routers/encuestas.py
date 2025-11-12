@@ -80,6 +80,7 @@ async def obtener_mis_encuestas(user_data: dict = Depends(verify_firebase_token)
                 s.fecha_limite,
                 s.respondido_por_email,
                 s.respondido_por_nombre,
+                s.encuestado_nombre,
                 s.tipo_respuesta,
                 s.fecha_respuesta
             FROM `{TABLE_ENCUESTAS_SOLICITUDES}` s
@@ -109,6 +110,7 @@ async def obtener_mis_encuestas(user_data: dict = Depends(verify_firebase_token)
                 s.fecha_limite,
                 s.respondido_por_email,
                 s.respondido_por_nombre,
+                s.encuestado_nombre,
                 s.tipo_respuesta,
                 s.fecha_respuesta
             FROM `{TABLE_ENCUESTAS_SOLICITUDES}` s
@@ -180,6 +182,7 @@ async def obtener_mis_encuestas(user_data: dict = Depends(verify_firebase_token)
                 "fecha_limite": row.fecha_limite.isoformat() if row.fecha_limite else None,
                 "respondido_por_email": row.respondido_por_email,
                 "respondido_por_nombre": row.respondido_por_nombre,
+                "encuestado_nombre": row.encuestado_nombre,
                 "tipo_respuesta": row.tipo_respuesta,
                 "fecha_respuesta": row.fecha_respuesta.isoformat() if row.fecha_respuesta else None,
                 "puede_responder": puede_responder,
@@ -247,6 +250,7 @@ async def obtener_preguntas_encuesta(
             raise HTTPException(status_code=404, detail="Encuesta no encontrada")
         
         encuesta = encuesta_result[0]
+        encuestado_nombre = None
         
         if not encuesta.puede_ver:
             raise HTTPException(status_code=403, detail="No tiene acceso a esta encuesta")
@@ -287,7 +291,8 @@ async def obtener_preguntas_encuesta(
                 "instalacion_rol": encuesta.instalacion_rol,
                 "modo": encuesta.modo,
                 "estado": encuesta.estado,
-                "fecha_limite": encuesta.fecha_limite.isoformat() if encuesta.fecha_limite else None
+                "fecha_limite": encuesta.fecha_limite.isoformat() if encuesta.fecha_limite else None,
+                "encuestado_nombre": getattr(encuesta, "encuestado_nombre", None)
             },
             "preguntas": preguntas
         }
@@ -344,6 +349,19 @@ async def responder_encuesta(
                 detail=f"Esta encuesta ya fue respondida por {encuesta.respondido_por_nombre}"
             )
         
+        if encuesta.modo == 'compartida':
+            encuestado_nombre = (request.encuestado_nombre or "").strip() if request.encuestado_nombre else ""
+            if not encuestado_nombre:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Debe indicar a quién se encuestó"
+                )
+        else:
+            if request.encuestado_nombre:
+                encuestado_nombre = request.encuestado_nombre.strip()
+            else:
+                encuestado_nombre = getattr(encuesta, "encuestado_nombre", None)
+        
         ahora_utc = datetime.now(timezone.utc)
         if encuesta.fecha_limite < ahora_utc:
             raise HTTPException(
@@ -384,6 +402,7 @@ async def responder_encuesta(
         SET estado = 'completada',
             respondido_por_email = @user_email,
             respondido_por_nombre = @user_nombre,
+            encuestado_nombre = @encuestado_nombre,
             tipo_respuesta = @tipo_respuesta,
             fecha_respuesta = CURRENT_TIMESTAMP()
         WHERE encuesta_id = @encuesta_id
@@ -399,6 +418,7 @@ async def responder_encuesta(
                 bigquery.ScalarQueryParameter("user_email", "STRING", user_email),
                 bigquery.ScalarQueryParameter("user_nombre", "STRING", user_nombre),
                 bigquery.ScalarQueryParameter("tipo_respuesta", "STRING", tipo_respuesta),
+                bigquery.ScalarQueryParameter("encuestado_nombre", "STRING", encuestado_nombre if encuestado_nombre else None),
             ]
         )
         
@@ -496,6 +516,7 @@ async def ver_respuestas_encuesta(
                 "instalacion_rol": encuesta.instalacion_rol,
                 "modo": encuesta.modo,
                 "respondido_por": encuesta.respondido_por_nombre,
+                "encuestado_nombre": getattr(encuesta, "encuestado_nombre", None),
                 "fecha_respuesta": encuesta.fecha_respuesta.isoformat() if encuesta.fecha_respuesta else None
             },
             "respuestas": respuestas

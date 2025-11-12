@@ -31,6 +31,7 @@ class EnviarMensajeRequest(BaseModel):
 
 class RespuestaEncuestaRequest(BaseModel):
     respuestas: List[Dict[str, Any]]  # [{"pregunta_id": "P001", "respuesta_valor": "5", "comentario": "..."}]
+    encuestado_nombre: Optional[str] = None
 
 
 class FCMTokenRequest(BaseModel):
