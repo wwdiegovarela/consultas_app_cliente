@@ -40,3 +40,13 @@ class FCMTokenRequest(BaseModel):
 class InstalacionesRequest(BaseModel):
     instalaciones: List[str]  # Lista de instalacion_rol
 
+
+class SendMessageNotificationRequest(BaseModel):
+    conversation_id: str
+    message_id: str
+    sender_id: str
+    sender_name: str
+    message_text: str
+    visible_para_cliente: bool = True
+    participant_user_ids: Optional[List[str]] = None  # Lista de firebase_uid de participantes (opcional)
+
