@@ -13,6 +13,7 @@ DATASET_APP = os.getenv("DATASET_APP", "app_clientes")
 
 # Tablas del sistema origen
 TABLE_COBERTURA = f"{PROJECT_ID}.{DATASET_REPORTES}.cobertura_instantanea"
+TABLE_COBERTURA_AGREGADA = f"{PROJECT_ID}.{DATASET_REPORTES}.mv_cobertura_instantanea"
 TABLE_HISTORICO = f"{PROJECT_ID}.{DATASET_REPORTES}.cr_asistencia_hist_tb"
 TABLE_INSTALACIONES = f"{PROJECT_ID}.{DATASET_APP}.cr_info_instalaciones"
 TABLE_PPC = f"{PROJECT_ID}.cr_vistas_reporte.cr_ppc_dia"  # Puestos Por Cubrir

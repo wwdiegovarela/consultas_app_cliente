@@ -7,7 +7,8 @@ from datetime import timedelta
 from dependencies import verify_firebase_token, verificar_permiso_cobertura, get_bq_client
 from config import (
     PROJECT_ID, DATASET_REPORTES, DATASET_APP,
-    TABLE_COBERTURA, TABLE_HISTORICO, TABLE_USUARIO_INST,
+    TABLE_COBERTURA, TABLE_COBERTURA_AGREGADA,
+    TABLE_HISTORICO, TABLE_USUARIO_INST,
     DIAS_HISTORICO_DEFAULT
 )
 from utils.semaforo import calcular_estado_semaforo
@@ -25,20 +26,17 @@ async def get_cobertura_general(user: dict = Depends(verificar_permiso_cobertura
     try:
         query = f"""
         SELECT 
-          COUNT(*) as total_turnos_activos,
-          SUM(CASE WHEN ci.asistencia = 1 THEN 1 ELSE 0 END) as turnos_cubiertos,
-          COUNT(*) - SUM(CASE WHEN ci.asistencia = 1 THEN 1 ELSE 0 END) as turnos_descubiertos,
-          
-          -- Porcentaje general
-          ROUND(SAFE_DIVIDE(
-            SUM(CASE WHEN ci.asistencia = 1 THEN 1 ELSE 0 END),
-            COUNT(*)
-          ) * 100, 2) as porcentaje_cobertura_general,
-          
-          -- Timestamp de actualización
-          MAX(ci.hora_actual) as ultima_actualizacion,
-          
-          -- Total de PPC (Puestos Por Cubrir)
+          SUM(ci.total_guardias_requeridos) AS total_turnos_activos,
+          SUM(ci.guardias_presentes) AS turnos_cubiertos,
+          SUM(ci.total_guardias_requeridos) - SUM(ci.guardias_presentes) AS turnos_descubiertos,
+          ROUND(
+            SAFE_DIVIDE(
+              SUM(ci.guardias_presentes),
+              NULLIF(SUM(ci.total_guardias_requeridos), 0)
+            ) * 100,
+            2
+          ) AS porcentaje_cobertura_general,
+          MAX(ci.ultima_actualizacion) AS ultima_actualizacion,
           (
             SELECT COUNT(*)
             FROM `{PROJECT_ID}.cr_vistas_reporte.cr_ppc_dia` ppc
@@ -46,9 +44,8 @@ async def get_cobertura_general(user: dict = Depends(verificar_permiso_cobertura
               ON ppc.instalacion_rol = ui2.instalacion_rol
             WHERE ui2.email_login = @user_email
               AND ui2.puede_ver = TRUE
-          ) as total_ppc
-
-        FROM `{TABLE_COBERTURA}` ci
+          ) AS total_ppc
+        FROM `{TABLE_COBERTURA_AGREGADA}` ci
         INNER JOIN `{TABLE_USUARIO_INST}` ui 
           ON ci.cliente_rol = ui.cliente_rol 
           AND ci.instalacion_rol = ui.instalacion_rol
@@ -107,44 +104,34 @@ async def get_cobertura_por_instalacion(user: dict = Depends(verificar_permiso_c
           ci.instalacion_rol,
           ci.zona,
           ci.cliente_rol,
-          
-          -- Contadores
-          COUNT(*) as total_guardias_requeridos,
-          SUM(CASE WHEN ci.asistencia = 1 THEN 1 ELSE 0 END) as guardias_presentes,
-          COUNT(*) - SUM(CASE WHEN ci.asistencia = 1 THEN 1 ELSE 0 END) as guardias_ausentes,
-          
-          -- Porcentaje de cobertura
-          ROUND(SAFE_DIVIDE(
-            SUM(CASE WHEN ci.asistencia = 1 THEN 1 ELSE 0 END),
-            COUNT(*)
-          ) * 100, 2) as porcentaje_cobertura,
-          
-          -- Cantidad de turnos por estado COB
-          COUNTIF(ci.COB = 'CUBIERTO') as turnos_cubiertos,
-          COUNTIF(ci.COB = 'DESCUBIERTO') as turnos_descubiertos,
-          
-          -- Turnos activos
-          COUNT(DISTINCT ci.turno) as cantidad_turnos_activos,
-          
-          -- PPC (Puestos Por Cubrir) - Optimizado con LEFT JOIN
-          COALESCE(ppc.cantidad_ppc, 0) as ppc,
-          
-          -- FaceID (verificar si la instalación tiene equipo Face ID)
+          SUM(ci.total_guardias_requeridos) AS total_guardias_requeridos,
+          SUM(ci.guardias_presentes) AS guardias_presentes,
+          SUM(ci.total_guardias_requeridos) - SUM(ci.guardias_presentes) AS guardias_ausentes,
+          ROUND(
+            SAFE_DIVIDE(
+              SUM(ci.guardias_presentes),
+              NULLIF(SUM(ci.total_guardias_requeridos), 0)
+            ) * 100,
+            2
+          ) AS porcentaje_cobertura,
+          SUM(ci.turnos_cubiertos) AS turnos_cubiertos,
+          SUM(ci.turnos_descubiertos) AS turnos_descubiertos,
+          SUM(ci.cantidad_turnos_activos) AS cantidad_turnos_activos,
+          COALESCE(ppc.cantidad_ppc, 0) AS ppc,
           CASE 
             WHEN faceid.nombre IS NOT NULL THEN TRUE 
             ELSE FALSE 
-          END as tiene_faceid,
-          faceid.numero as faceid_numero,
-          faceid.ult_conexion as faceid_ultima_conexion
-
-        FROM `{TABLE_COBERTURA}` ci
+          END AS tiene_faceid,
+          faceid.numero AS faceid_numero,
+          faceid.ult_conexion AS faceid_ultima_conexion
+        FROM `{TABLE_COBERTURA_AGREGADA}` ci
         INNER JOIN `{TABLE_USUARIO_INST}` ui 
           ON ci.cliente_rol = ui.cliente_rol 
           AND ci.instalacion_rol = ui.instalacion_rol
         LEFT JOIN `{PROJECT_ID}.{DATASET_REPORTES}.cr_equipos_faceid` faceid
           ON ci.instalacion_rol = faceid.nombre
         LEFT JOIN (
-          SELECT instalacion_rol, COUNT(*) as cantidad_ppc
+          SELECT instalacion_rol, COUNT(*) AS cantidad_ppc
           FROM `{PROJECT_ID}.cr_vistas_reporte.cr_ppc_dia`
           GROUP BY instalacion_rol
         ) ppc ON ci.instalacion_rol = ppc.instalacion_rol
@@ -210,33 +197,31 @@ async def get_cobertura_por_instalacion_fast(user: dict = Depends(verify_firebas
     
     try:
         query = f"""
-                SELECT 
+        SELECT 
           ci.instalacion_rol,
           ci.zona,
           ci.cliente_rol,
-          
-          -- Contadores básicos
-          COUNT(*) AS total_guardias_requeridos,
-          SUM(CASE WHEN ci.asistencia = 1 THEN 1 ELSE 0 END) AS guardias_presentes,
-          COUNT(*) - SUM(CASE WHEN ci.asistencia = 1 THEN 1 ELSE 0 END) AS guardias_ausentes,
-          
-          -- Porcentaje de Cobertura
-          ROUND(SAFE_DIVIDE(
-            SUM(CASE WHEN ci.asistencia = 1 THEN 1 ELSE 0 END),
-            COUNT(*)
-          ) * 100, 1) AS porcentaje_cobertura,
-          
-          -- PPC
+          SUM(ci.total_guardias_requeridos) AS total_guardias_requeridos,
+          SUM(ci.guardias_presentes) AS guardias_presentes,
+          SUM(ci.total_guardias_requeridos) - SUM(ci.guardias_presentes) AS guardias_ausentes,
+          ROUND(
+            SAFE_DIVIDE(
+              SUM(ci.guardias_presentes),
+              NULLIF(SUM(ci.total_guardias_requeridos), 0)
+            ) * 100,
+            1
+          ) AS porcentaje_cobertura,
+          SUM(ci.turnos_cubiertos) AS turnos_cubiertos,
+          SUM(ci.turnos_descubiertos) AS turnos_descubiertos,
+          SUM(ci.cantidad_turnos_activos) AS cantidad_turnos_activos,
           COALESCE(ppc.cantidad_ppc, 0) AS cantidad_ppc_total,
-          
-          -- FaceID básico
           CASE WHEN faceid.nombre IS NOT NULL THEN TRUE ELSE FALSE END AS tiene_faceid,
           faceid.numero AS faceid_numero,
           faceid.ult_conexion AS faceid_ultima_conexion
-        
-        FROM `{TABLE_COBERTURA}` ci
+        FROM `{TABLE_COBERTURA_AGREGADA}` ci
         INNER JOIN `{TABLE_USUARIO_INST}` ui 
           ON ci.instalacion_rol = ui.instalacion_rol
+         AND ci.cliente_rol = ui.cliente_rol
         LEFT JOIN `{PROJECT_ID}.{DATASET_REPORTES}.cr_equipos_faceid` faceid
           ON ci.instalacion_rol = faceid.nombre
         LEFT JOIN (
@@ -308,27 +293,25 @@ async def get_cobertura_por_instalacion_fast_v2(user: dict = Depends(verify_fire
           ci.zona,
           ci.cliente_rol,
           ci.tipo_de_servicio,
-          
-          -- Contadores básicos (agrupados por tipo_de_servicio)
-          COUNT(*) AS total_guardias_requeridos,
-          SUM(CASE WHEN ci.asistencia = 1 THEN 1 ELSE 0 END) AS guardias_presentes,
-          COUNT(*) - SUM(CASE WHEN ci.asistencia = 1 THEN 1 ELSE 0 END) AS guardias_ausentes,
-          
-          -- Porcentaje de Cobertura
-          ROUND(SAFE_DIVIDE(
-            SUM(CASE WHEN ci.asistencia = 1 THEN 1 ELSE 0 END),
-            COUNT(*)
-          ) * 100, 1) AS porcentaje_cobertura,
-          
-          -- PPC desde JOIN optimizado
+          ci.total_guardias_requeridos,
+          ci.guardias_presentes,
+          ci.total_guardias_requeridos - ci.guardias_presentes AS guardias_ausentes,
+          ROUND(
+            SAFE_DIVIDE(
+              ci.guardias_presentes,
+              NULLIF(ci.total_guardias_requeridos, 0)
+            ) * 100,
+            1
+          ) AS porcentaje_cobertura,
+          ci.turnos_cubiertos,
+          ci.turnos_descubiertos,
+          ci.cantidad_turnos_activos,
           COALESCE(ppc.cantidad_ppc, 0) AS cantidad_ppc_total,
-          
-          -- FaceID básico
           CASE WHEN faceid.nombre IS NOT NULL THEN TRUE ELSE FALSE END AS tiene_faceid,
           faceid.numero AS faceid_numero,
           faceid.ult_conexion AS faceid_ultima_conexion
 
-        FROM `{TABLE_COBERTURA}` ci
+        FROM `{TABLE_COBERTURA_AGREGADA}` ci
         INNER JOIN `{TABLE_USUARIO_INST}` ui 
           ON ci.cliente_rol = ui.cliente_rol 
           AND ci.instalacion_rol = ui.instalacion_rol
@@ -341,7 +324,6 @@ async def get_cobertura_por_instalacion_fast_v2(user: dict = Depends(verify_fire
         ) ppc ON ci.instalacion_rol = ppc.instalacion_rol
         WHERE ui.email_login = @user_email
           AND ui.puede_ver = TRUE
-        GROUP BY ci.instalacion_rol, ci.zona, ci.cliente_rol, ci.tipo_de_servicio, faceid.nombre, faceid.numero, faceid.ult_conexion, ppc.cantidad_ppc
         ORDER BY ci.instalacion_rol, ci.tipo_de_servicio, guardias_ausentes DESC
         """
         
