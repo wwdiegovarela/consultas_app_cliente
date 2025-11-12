@@ -116,7 +116,6 @@ async def get_cobertura_por_instalacion(user: dict = Depends(verificar_permiso_c
           ) AS porcentaje_cobertura,
           SUM(ci.turnos_cubiertos) AS turnos_cubiertos,
           SUM(ci.turnos_descubiertos) AS turnos_descubiertos,
-          SUM(ci.cantidad_turnos_activos) AS cantidad_turnos_activos,
           COALESCE(ppc.cantidad_ppc, 0) AS ppc,
           CASE 
             WHEN faceid.nombre IS NOT NULL THEN TRUE 
@@ -168,7 +167,6 @@ async def get_cobertura_por_instalacion(user: dict = Depends(verificar_permiso_c
                 "estado_semaforo": calcular_estado_semaforo(porcentaje),
                 "turnos_cubiertos": row.turnos_cubiertos,
                 "turnos_descubiertos": row.turnos_descubiertos,
-                "cantidad_turnos_activos": row.cantidad_turnos_activos,
                 "ppc": row.ppc,
                 "tiene_faceid": bool(row.tiene_faceid),
                 "faceid_numero": row.faceid_numero if row.faceid_numero else None,
@@ -213,7 +211,6 @@ async def get_cobertura_por_instalacion_fast(user: dict = Depends(verify_firebas
           ) AS porcentaje_cobertura,
           SUM(ci.turnos_cubiertos) AS turnos_cubiertos,
           SUM(ci.turnos_descubiertos) AS turnos_descubiertos,
-          SUM(ci.cantidad_turnos_activos) AS cantidad_turnos_activos,
           COALESCE(ppc.cantidad_ppc, 0) AS cantidad_ppc_total,
           CASE WHEN faceid.nombre IS NOT NULL THEN TRUE ELSE FALSE END AS tiene_faceid,
           faceid.numero AS faceid_numero,
@@ -305,7 +302,6 @@ async def get_cobertura_por_instalacion_fast_v2(user: dict = Depends(verify_fire
           ) AS porcentaje_cobertura,
           ci.turnos_cubiertos,
           ci.turnos_descubiertos,
-          ci.cantidad_turnos_activos,
           COALESCE(ppc.cantidad_ppc, 0) AS cantidad_ppc_total,
           CASE WHEN faceid.nombre IS NOT NULL THEN TRUE ELSE FALSE END AS tiene_faceid,
           faceid.numero AS faceid_numero,
