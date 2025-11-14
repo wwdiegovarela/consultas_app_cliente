@@ -272,49 +272,63 @@ async def send_message_notification(
         # Truncar el texto del mensaje si es muy largo
         notification_body = message_text[:100] + "..." if len(message_text) > 100 else message_text
         
-        # Crear el mensaje de notificación
-        message = messaging.MulticastMessage(
-            notification=messaging.Notification(
-                title=f"Nuevo mensaje de {sender_name}",
-                body=notification_body,
-            ),
-            data={
-                "tipo": "nuevo_mensaje",
-                "conversationId": conversation_id,
-                "messageId": message_id,
-                "senderId": sender_id,
-                "senderName": sender_name,
-                "visibleParaCliente": str(visible_para_cliente).lower(),
-            },
-            tokens=tokens,
-        )
+        # Preparar datos del mensaje
+        message_data = {
+            "tipo": "nuevo_mensaje",
+            "conversationId": conversation_id,
+            "messageId": message_id,
+            "senderId": sender_id,
+            "senderName": sender_name,
+            "visibleParaCliente": str(visible_para_cliente).lower(),
+        }
         
-        # Enviar notificaciones
+        # Enviar notificaciones individualmente (send_multicast tiene problemas con /batch)
+        # Usamos send() que ya sabemos que funciona correctamente
+        success_count = 0
+        failure_count = 0
+        errors = []
+        
+        print(f"📤 Enviando {len(tokens)} notificaciones individualmente...")
+        
         try:
-            response = messaging.send_multicast(message)
+            for idx, token in enumerate(tokens):
+                try:
+                    message = messaging.Message(
+                        notification=messaging.Notification(
+                            title=f"Nuevo mensaje de {sender_name}",
+                            body=notification_body,
+                        ),
+                        data=message_data,
+                        token=token,
+                    )
+                    
+                    response = messaging.send(message)
+                    success_count += 1
+                    if (idx + 1) % 10 == 0:
+                        print(f"   ✅ Progreso: {idx + 1}/{len(tokens)} enviadas")
+                    
+                except Exception as e:
+                    failure_count += 1
+                    error_msg = f"Token {idx}: {type(e).__name__}: {str(e)}"
+                    errors.append(error_msg)
+                    print(f"   ❌ {error_msg}")
             
-            print(f"✅ Notificaciones enviadas: {response.success_count} exitosas, {response.failure_count} fallidas")
+            print(f"✅ Notificaciones enviadas: {success_count} exitosas, {failure_count} fallidas")
             
-            if response.failure_count > 0:
-                print(f"⚠️ Algunas notificaciones fallaron:")
-                for idx, resp in enumerate(response.responses):
-                    if not resp.success:
-                        print(f"   Token {idx}: {resp.exception}")
+            if errors:
+                print(f"⚠️ Errores detallados:")
+                for error in errors[:5]:  # Mostrar solo los primeros 5 errores
+                    print(f"   {error}")
+                if len(errors) > 5:
+                    print(f"   ... y {len(errors) - 5} errores más")
             
             return {
                 "success": True,
                 "message": "Notificaciones enviadas",
-                "sent_count": response.success_count,
-                "failed_count": response.failure_count,
+                "sent_count": success_count,
+                "failed_count": failure_count,
                 "total_tokens": len(tokens)
             }
-        except Exception as fcm_error:
-            print(f"❌ Error en Firebase Admin SDK al enviar notificaciones: {str(fcm_error)}")
-            print(f"   Tipo de error: {type(fcm_error).__name__}")
-            import traceback
-            print(f"   Traceback: {traceback.format_exc()}")
-            # Re-lanzar para que se capture en el except externo
-            raise
         
     except Exception as e:
         error_msg = str(e)
