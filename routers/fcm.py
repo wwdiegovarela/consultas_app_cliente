@@ -1,7 +1,7 @@
 """
 Endpoints de FCM (Firebase Cloud Messaging)
 """
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from google.cloud import bigquery
 from firebase_admin import messaging
 from dependencies import verify_firebase_token, get_bq_client
@@ -169,32 +169,26 @@ async def update_fcm_token(
         )
 
 
-@router.post("/api/fcm/send-message-notification")
-async def send_message_notification(
-    request: SendMessageNotificationRequest,
-    user_data: dict = Depends(verify_firebase_token)
+def _send_notifications_background(
+    conversation_id: str,
+    message_id: str,
+    sender_id: str,
+    sender_name: str,
+    message_text: str,
+    visible_para_cliente: bool,
+    participant_user_ids: Optional[List[str]] = None
 ):
     """
-    Envía notificaciones push a los participantes de una conversación cuando se crea un mensaje.
-    No envía notificación al remitente ni a clientes si el mensaje no es visible para ellos.
+    Función que se ejecuta en background para enviar notificaciones.
+    Esto permite que el endpoint responda inmediatamente.
     """
     try:
-        conversation_id = request.conversation_id
-        message_id = request.message_id
-        sender_id = request.sender_id
-        sender_name = request.sender_name
-        message_text = request.message_text
-        visible_para_cliente = request.visible_para_cliente
-        participant_user_ids = request.participant_user_ids
-        
-        print(f"📬 Enviando notificaciones push para mensaje: {message_id}")
+        print(f"📬 [Background] Enviando notificaciones push para mensaje: {message_id}")
         print(f"   Conversación: {conversation_id}")
         print(f"   Remitente: {sender_name} ({sender_id})")
         
         # Obtener los tokens FCM de los participantes
-        # Necesitamos obtener tokens junto con el rol para filtrar clientes si el mensaje no es visible
         if participant_user_ids:
-            # Si se proporcionan los IDs de participantes, obtener solo esos tokens con sus roles
             query = f"""
             SELECT 
                 u.email_login,
@@ -219,7 +213,6 @@ async def send_message_notification(
                 ]
             )
         else:
-            # Si no se proporcionan, obtener todos los tokens activos (excepto el remitente)
             query = f"""
             SELECT 
                 u.email_login,
@@ -251,7 +244,6 @@ async def send_message_notification(
             if not row.fcm_token:
                 continue
             
-            # Si el mensaje no es visible para clientes, no enviar notificación a clientes
             if not visible_para_cliente and row.rol_id == "CLIENTE":
                 print(f"   ⏭️ Saltando cliente {row.email_login} (mensaje no visible)")
                 continue
@@ -259,20 +251,12 @@ async def send_message_notification(
             tokens.append(row.fcm_token)
         
         if not tokens:
-            print("⚠️ No hay tokens FCM disponibles para enviar notificaciones")
-            return {
-                "success": True,
-                "message": "No hay tokens FCM disponibles",
-                "sent_count": 0
-            }
+            print("⚠️ [Background] No hay tokens FCM disponibles")
+            return
         
-        print(f"📱 Encontrados {len(tokens)} tokens FCM para enviar notificaciones")
+        print(f"📱 [Background] Encontrados {len(tokens)} tokens FCM")
         
-        # Preparar el mensaje de notificación
-        # Truncar el texto del mensaje si es muy largo
         notification_body = message_text[:100] + "..." if len(message_text) > 100 else message_text
-        
-        # Preparar datos del mensaje
         message_data = {
             "tipo": "nuevo_mensaje",
             "conversationId": conversation_id,
@@ -282,65 +266,81 @@ async def send_message_notification(
             "visibleParaCliente": str(visible_para_cliente).lower(),
         }
         
-        # Enviar notificaciones individualmente (send_multicast tiene problemas con /batch)
-        # Usamos send() que ya sabemos que funciona correctamente
         success_count = 0
         failure_count = 0
-        errors = []
         
-        print(f"📤 Enviando {len(tokens)} notificaciones individualmente...")
+        print(f"📤 [Background] Enviando {len(tokens)} notificaciones...")
         
-        try:
-            for idx, token in enumerate(tokens):
-                try:
-                    message = messaging.Message(
-                        notification=messaging.Notification(
-                            title=f"Nuevo mensaje de {sender_name}",
-                            body=notification_body,
-                        ),
-                        data=message_data,
-                        token=token,
-                    )
+        for idx, token in enumerate(tokens):
+            try:
+                message = messaging.Message(
+                    notification=messaging.Notification(
+                        title=f"Nuevo mensaje de {sender_name}",
+                        body=notification_body,
+                    ),
+                    data=message_data,
+                    token=token,
+                )
+                
+                messaging.send(message)
+                success_count += 1
+                if (idx + 1) % 10 == 0:
+                    print(f"   ✅ [Background] Progreso: {idx + 1}/{len(tokens)} enviadas")
                     
-                    response = messaging.send(message)
-                    success_count += 1
-                    if (idx + 1) % 10 == 0:
-                        print(f"   ✅ Progreso: {idx + 1}/{len(tokens)} enviadas")
-                    
-                except Exception as e:
-                    failure_count += 1
-                    error_msg = f"Token {idx}: {type(e).__name__}: {str(e)}"
-                    errors.append(error_msg)
-                    print(f"   ❌ {error_msg}")
-            
-            print(f"✅ Notificaciones enviadas: {success_count} exitosas, {failure_count} fallidas")
-            
-            if errors:
-                print(f"⚠️ Errores detallados:")
-                for error in errors[:5]:  # Mostrar solo los primeros 5 errores
-                    print(f"   {error}")
-                if len(errors) > 5:
-                    print(f"   ... y {len(errors) - 5} errores más")
-            
-            return {
-                "success": True,
-                "message": "Notificaciones enviadas",
-                "sent_count": success_count,
-                "failed_count": failure_count,
-                "total_tokens": len(tokens)
-            }
+            except Exception as e:
+                failure_count += 1
+                print(f"   ❌ [Background] Token {idx}: {type(e).__name__}: {str(e)}")
+        
+        print(f"✅ [Background] Notificaciones enviadas: {success_count} exitosas, {failure_count} fallidas")
+        
+    except Exception as e:
+        import traceback
+        print(f"❌ [Background] Error enviando notificaciones: {type(e).__name__}: {str(e)}")
+        print(f"   Traceback: {traceback.format_exc()}")
+
+
+@router.post("/api/fcm/send-message-notification")
+async def send_message_notification(
+    request: SendMessageNotificationRequest,
+    background_tasks: BackgroundTasks,
+    user_data: dict = Depends(verify_firebase_token)
+):
+    """
+    Envía notificaciones push a los participantes de una conversación cuando se crea un mensaje.
+    Responde inmediatamente y procesa las notificaciones en background para no afectar la UX.
+    No envía notificación al remitente ni a clientes si el mensaje no es visible para ellos.
+    """
+    try:
+        # Agregar tarea en background y responder inmediatamente
+        background_tasks.add_task(
+            _send_notifications_background,
+            conversation_id=request.conversation_id,
+            message_id=request.message_id,
+            sender_id=request.sender_id,
+            sender_name=request.sender_name,
+            message_text=request.message_text,
+            visible_para_cliente=request.visible_para_cliente,
+            participant_user_ids=request.participant_user_ids
+        )
+        
+        print(f"📬 Notificaciones programadas para envío en background: {request.message_id}")
+        
+        # Responder inmediatamente
+        return {
+            "success": True,
+            "message": "Notificaciones programadas para envío",
+            "sent_count": 0,  # Se actualizará en background
+            "status": "processing"
+        }
         
     except Exception as e:
         error_msg = str(e)
         error_type = type(e).__name__
-        print(f"❌ Error enviando notificaciones push: {error_type}: {error_msg}")
-        import traceback
-        print(f"   Traceback completo: {traceback.format_exc()}")
+        print(f"❌ Error programando notificaciones: {error_type}: {error_msg}")
         
-        # No lanzar excepción, solo loguear (no es crítico para el funcionamiento)
         return {
             "success": False,
-            "message": f"Error enviando notificaciones: {error_type}: {error_msg}",
+            "message": f"Error programando notificaciones: {error_type}: {error_msg}",
             "sent_count": 0,
             "error_type": error_type
         }
