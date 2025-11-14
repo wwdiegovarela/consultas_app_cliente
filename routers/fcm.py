@@ -238,23 +238,37 @@ def _send_notifications_background(
         query_job = get_bq_client().query(query, job_config=job_config)
         results = list(query_job.result())
         
+        print(f"📊 [Background] Resultados de BigQuery: {len(results)} registros")
+        
         # Filtrar tokens válidos y aplicar lógica de visibilidad
         tokens = []
+        token_info = []  # Para logging
         for row in results:
             if not row.fcm_token:
+                print(f"   ⚠️ [Background] Token vacío para {row.email_login}")
                 continue
             
             if not visible_para_cliente and row.rol_id == "CLIENTE":
-                print(f"   ⏭️ Saltando cliente {row.email_login} (mensaje no visible)")
+                print(f"   ⏭️ [Background] Saltando cliente {row.email_login} (mensaje no visible)")
                 continue
             
             tokens.append(row.fcm_token)
+            token_info.append({
+                'email': row.email_login,
+                'token_preview': row.fcm_token[:20] + '...' if len(row.fcm_token) > 20 else row.fcm_token,
+                'rol': row.rol_id
+            })
+        
+        # Log detallado de tokens
+        print(f"📋 [Background] Tokens que se enviarán:")
+        for info in token_info:
+            print(f"   - {info['email']} ({info['rol']}): {info['token_preview']}")
         
         if not tokens:
             print("⚠️ [Background] No hay tokens FCM disponibles")
             return
         
-        print(f"📱 [Background] Encontrados {len(tokens)} tokens FCM")
+        print(f"📱 [Background] Encontrados {len(tokens)} tokens FCM válidos")
         
         notification_body = message_text[:100] + "..." if len(message_text) > 100 else message_text
         message_data = {
@@ -282,14 +296,22 @@ def _send_notifications_background(
                     token=token,
                 )
                 
-                messaging.send(message)
+                response = messaging.send(message)
                 success_count += 1
+                print(f"   ✅ [Background] Token {idx + 1}/{len(tokens)} enviado: {response[:50] if response else 'OK'}")
+                
                 if (idx + 1) % 10 == 0:
-                    print(f"   ✅ [Background] Progreso: {idx + 1}/{len(tokens)} enviadas")
+                    print(f"   📊 [Background] Progreso: {idx + 1}/{len(tokens)} enviadas")
                     
             except Exception as e:
                 failure_count += 1
-                print(f"   ❌ [Background] Token {idx}: {type(e).__name__}: {str(e)}")
+                error_type = type(e).__name__
+                error_msg = str(e)
+                print(f"   ❌ [Background] Token {idx + 1}/{len(tokens)} falló: {error_type}: {error_msg}")
+                
+                # Si es un error de token inválido, loguear más detalles
+                if 'invalid' in error_msg.lower() or 'not found' in error_msg.lower() or 'registration' in error_msg.lower():
+                    print(f"      ⚠️ Token inválido o expirado: {token[:30]}...")
         
         print(f"✅ [Background] Notificaciones enviadas: {success_count} exitosas, {failure_count} fallidas")
         
