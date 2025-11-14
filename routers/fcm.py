@@ -12,6 +12,114 @@ from typing import List, Optional
 router = APIRouter()
 
 
+@router.post("/api/fcm/test-notification")
+async def test_notification(
+    user_data: dict = Depends(verify_firebase_token)
+):
+    """
+    Endpoint de prueba para diagnosticar problemas con FCM.
+    Intenta enviar una notificación de prueba a un token específico.
+    """
+    try:
+        print("🧪 ===== PRUEBA DE NOTIFICACIÓN FCM =====")
+        
+        # Verificar que Firebase Admin esté inicializado
+        import firebase_admin
+        if not firebase_admin._apps:
+            return {
+                "success": False,
+                "error": "Firebase Admin no está inicializado",
+                "step": "initialization_check"
+            }
+        print("✅ Firebase Admin está inicializado")
+        
+        # Obtener el token FCM del usuario actual desde BigQuery
+        user_email = user_data["email"]
+        query = f"""
+        SELECT fcm_token
+        FROM `{TABLE_USUARIOS}`
+        WHERE email_login = @user_email
+          AND fcm_token IS NOT NULL
+          AND fcm_token != ''
+        LIMIT 1
+        """
+        
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("user_email", "STRING", user_email)
+            ]
+        )
+        
+        query_job = get_bq_client().query(query, job_config=job_config)
+        results = list(query_job.result())
+        
+        if not results or not results[0].fcm_token:
+            return {
+                "success": False,
+                "error": "No se encontró token FCM para el usuario",
+                "step": "token_lookup",
+                "user_email": user_email
+            }
+        
+        test_token = results[0].fcm_token
+        print(f"📱 Token FCM encontrado: {test_token[:20]}...")
+        
+        # Intentar enviar una notificación de prueba
+        try:
+            message = messaging.Message(
+                notification=messaging.Notification(
+                    title="Prueba de Notificación",
+                    body="Esta es una notificación de prueba desde el backend",
+                ),
+                data={
+                    "tipo": "test",
+                    "timestamp": str(int(__import__('time').time())),
+                },
+                token=test_token,
+            )
+            
+            print("📤 Intentando enviar notificación de prueba...")
+            response = messaging.send(message)
+            print(f"✅ Notificación enviada exitosamente: {response}")
+            
+            return {
+                "success": True,
+                "message": "Notificación de prueba enviada exitosamente",
+                "message_id": response,
+                "step": "send_success"
+            }
+            
+        except Exception as send_error:
+            error_type = type(send_error).__name__
+            error_msg = str(send_error)
+            print(f"❌ Error al enviar notificación: {error_type}: {error_msg}")
+            import traceback
+            print(f"   Traceback: {traceback.format_exc()}")
+            
+            return {
+                "success": False,
+                "error": f"{error_type}: {error_msg}",
+                "error_type": error_type,
+                "step": "send_error",
+                "traceback": traceback.format_exc()
+            }
+            
+    except Exception as e:
+        error_type = type(e).__name__
+        error_msg = str(e)
+        print(f"❌ Error en endpoint de prueba: {error_type}: {error_msg}")
+        import traceback
+        print(f"   Traceback: {traceback.format_exc()}")
+        
+        return {
+            "success": False,
+            "error": f"{error_type}: {error_msg}",
+            "error_type": error_type,
+            "step": "general_error",
+            "traceback": traceback.format_exc()
+        }
+
+
 @router.post("/api/fcm/update-token")
 async def update_fcm_token(
     request: FCMTokenRequest,
