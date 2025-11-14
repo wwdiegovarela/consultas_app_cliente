@@ -22,9 +22,25 @@ from dependencies import set_bq_client
 
 # Inicializar Firebase Admin
 try:
-    initialize_app()
-except ValueError:
+    # En Cloud Run, Firebase Admin usa las credenciales de la cuenta de servicio automáticamente
+    # Especificar el proyecto explícitamente para evitar problemas
+    import firebase_admin
+    if not firebase_admin._apps:
+        initialize_app(options={
+            'projectId': os.getenv('GCP_PROJECT_ID', 'worldwide-470917'),
+        })
+        print("[OK] Firebase Admin inicializado correctamente")
+    else:
+        print("[INFO] Firebase Admin ya estaba inicializado")
+except ValueError as e:
     # Ya está inicializado
+    print(f"[INFO] Firebase Admin ya estaba inicializado: {e}")
+    pass
+except Exception as e:
+    print(f"[ERROR] Error inicializando Firebase Admin: {e}")
+    import traceback
+    print(f"[ERROR] Traceback: {traceback.format_exc()}")
+    # No bloquear el inicio del servidor, pero loguear el error
     pass
 
 # Inicializar API

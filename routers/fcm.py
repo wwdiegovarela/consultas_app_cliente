@@ -182,30 +182,44 @@ async def send_message_notification(
         )
         
         # Enviar notificaciones
-        response = messaging.send_multicast(message)
-        
-        print(f"✅ Notificaciones enviadas: {response.success_count} exitosas, {response.failure_count} fallidas")
-        
-        if response.failure_count > 0:
-            print(f"⚠️ Algunas notificaciones fallaron:")
-            for idx, resp in enumerate(response.responses):
-                if not resp.success:
-                    print(f"   Token {idx}: {resp.exception}")
-        
-        return {
-            "success": True,
-            "message": "Notificaciones enviadas",
-            "sent_count": response.success_count,
-            "failed_count": response.failure_count,
-            "total_tokens": len(tokens)
-        }
+        try:
+            response = messaging.send_multicast(message)
+            
+            print(f"✅ Notificaciones enviadas: {response.success_count} exitosas, {response.failure_count} fallidas")
+            
+            if response.failure_count > 0:
+                print(f"⚠️ Algunas notificaciones fallaron:")
+                for idx, resp in enumerate(response.responses):
+                    if not resp.success:
+                        print(f"   Token {idx}: {resp.exception}")
+            
+            return {
+                "success": True,
+                "message": "Notificaciones enviadas",
+                "sent_count": response.success_count,
+                "failed_count": response.failure_count,
+                "total_tokens": len(tokens)
+            }
+        except Exception as fcm_error:
+            print(f"❌ Error en Firebase Admin SDK al enviar notificaciones: {str(fcm_error)}")
+            print(f"   Tipo de error: {type(fcm_error).__name__}")
+            import traceback
+            print(f"   Traceback: {traceback.format_exc()}")
+            # Re-lanzar para que se capture en el except externo
+            raise
         
     except Exception as e:
-        print(f"❌ Error enviando notificaciones push: {str(e)}")
+        error_msg = str(e)
+        error_type = type(e).__name__
+        print(f"❌ Error enviando notificaciones push: {error_type}: {error_msg}")
+        import traceback
+        print(f"   Traceback completo: {traceback.format_exc()}")
+        
         # No lanzar excepción, solo loguear (no es crítico para el funcionamiento)
         return {
             "success": False,
-            "message": f"Error enviando notificaciones: {str(e)}",
-            "sent_count": 0
+            "message": f"Error enviando notificaciones: {error_type}: {error_msg}",
+            "sent_count": 0,
+            "error_type": error_type
         }
 
