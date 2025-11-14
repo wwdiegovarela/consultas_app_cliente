@@ -98,7 +98,7 @@ async def send_message_notification(
               ON u.email_login = p.email_login
             WHERE u.fcm_token IS NOT NULL
               AND u.fcm_token != ''
-              AND u.usuario_activo = TRUE
+              AND (p.usuario_activo = TRUE OR p.usuario_activo IS NULL)
               AND u.firebase_uid IS NOT NULL
               AND u.firebase_uid != @sender_id
               AND u.firebase_uid IN UNNEST(@participant_ids)
@@ -123,7 +123,7 @@ async def send_message_notification(
               ON u.email_login = p.email_login
             WHERE u.fcm_token IS NOT NULL
               AND u.fcm_token != ''
-              AND u.usuario_activo = TRUE
+              AND (p.usuario_activo = TRUE OR p.usuario_activo IS NULL)
               AND u.firebase_uid IS NOT NULL
               AND u.firebase_uid != @sender_id
             """
