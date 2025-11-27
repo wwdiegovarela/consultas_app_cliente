@@ -37,6 +37,7 @@ async def get_cobertura_general(user: dict = Depends(verificar_permiso_cobertura
             2
           ) AS porcentaje_cobertura_general,
           MAX(ci.ultima_actualizacion) AS ultima_actualizacion,
+          ARRAY_AGG(DISTINCT ci.empresa IGNORE NULLS) AS empresas,
           (
             SELECT COUNT(*)
             FROM `{PROJECT_ID}.cr_vistas_reporte.cr_ppc_dia` ppc
@@ -70,7 +71,8 @@ async def get_cobertura_general(user: dict = Depends(verificar_permiso_cobertura
                 "porcentaje_cobertura_general": 0,
                 "estado_semaforo": "GRIS",
                 "ultima_actualizacion": None,
-                "total_ppc": 0
+                "total_ppc": 0,
+                "empresas": []
             }
         
         row = results[0]
@@ -84,7 +86,8 @@ async def get_cobertura_general(user: dict = Depends(verificar_permiso_cobertura
             "estado_semaforo": calcular_estado_semaforo(porcentaje),
             "ultima_actualizacion": row.ultima_actualizacion.isoformat() if row.ultima_actualizacion else None,
             "proxima_actualizacion": (row.ultima_actualizacion + timedelta(minutes=5)).isoformat() if row.ultima_actualizacion else None,
-            "total_ppc": row.total_ppc if hasattr(row, 'total_ppc') else 0
+            "total_ppc": row.total_ppc if hasattr(row, 'total_ppc') else 0,
+            "empresas": list(row.empresas) if hasattr(row, "empresas") and row.empresas is not None else []
         }
         
     except Exception as e:
@@ -104,6 +107,7 @@ async def get_cobertura_por_instalacion(user: dict = Depends(verificar_permiso_c
           ci.instalacion_rol,
           ci.zona,
           ci.cliente_rol,
+          ci.empresa,
           SUM(ci.total_guardias_requeridos) AS total_guardias_requeridos,
           SUM(ci.guardias_presentes) AS guardias_presentes,
           SUM(ci.total_guardias_requeridos) - SUM(ci.guardias_presentes) AS guardias_ausentes,
@@ -136,7 +140,7 @@ async def get_cobertura_por_instalacion(user: dict = Depends(verificar_permiso_c
         ) ppc ON ci.instalacion_rol = ppc.instalacion_rol
         WHERE ui.email_login = @user_email
           AND ui.puede_ver = TRUE
-        GROUP BY ci.instalacion_rol, ci.zona, ci.cliente_rol, faceid.nombre, faceid.numero, faceid.ult_conexion, ppc.cantidad_ppc
+        GROUP BY ci.instalacion_rol, ci.zona, ci.cliente_rol, ci.empresa, faceid.nombre, faceid.numero, faceid.ult_conexion, ppc.cantidad_ppc
         ORDER BY guardias_ausentes DESC, porcentaje_cobertura ASC, ci.instalacion_rol
         """
         
@@ -160,6 +164,7 @@ async def get_cobertura_por_instalacion(user: dict = Depends(verificar_permiso_c
                 "instalacion_rol": row.instalacion_rol,
                 "zona": row.zona,
                 "cliente_rol": row.cliente_rol,
+                "empresa": row.empresa,
                 "total_guardias_requeridos": row.total_guardias_requeridos,
                 "guardias_presentes": row.guardias_presentes,
                 "guardias_ausentes": row.guardias_ausentes,
@@ -199,6 +204,7 @@ async def get_cobertura_por_instalacion_fast(user: dict = Depends(verify_firebas
           ci.instalacion_rol,
           ci.zona,
           ci.cliente_rol,
+          ci.empresa,
           SUM(ci.total_guardias_requeridos) AS total_guardias_requeridos,
           SUM(ci.guardias_presentes) AS guardias_presentes,
           SUM(ci.total_guardias_requeridos) - SUM(ci.guardias_presentes) AS guardias_ausentes,
@@ -228,7 +234,7 @@ async def get_cobertura_por_instalacion_fast(user: dict = Depends(verify_firebas
         ) ppc ON ci.instalacion_rol = ppc.instalacion_rol
         WHERE ui.email_login = @user_email
           AND ui.puede_ver = TRUE
-        GROUP BY ci.instalacion_rol, ci.zona, ci.cliente_rol, faceid.nombre, faceid.numero, faceid.ult_conexion, ppc.cantidad_ppc
+        GROUP BY ci.instalacion_rol, ci.zona, ci.cliente_rol, ci.empresa, faceid.nombre, faceid.numero, faceid.ult_conexion, ppc.cantidad_ppc
         ORDER BY guardias_ausentes DESC, porcentaje_cobertura ASC
         """
         
@@ -252,6 +258,7 @@ async def get_cobertura_por_instalacion_fast(user: dict = Depends(verify_firebas
                 "instalacion_rol": row.instalacion_rol,
                 "zona": row.zona,
                 "cliente_rol": row.cliente_rol,
+                "empresa": row.empresa,
                 "total_guardias_requeridos": row.total_guardias_requeridos,
                 "guardias_presentes": row.guardias_presentes,
                 "guardias_ausentes": row.guardias_ausentes,
@@ -289,6 +296,7 @@ async def get_cobertura_por_instalacion_fast_v2(user: dict = Depends(verify_fire
           ci.instalacion_rol,
           ci.zona,
           ci.cliente_rol,
+          ci.empresa,
           ci.tipo_de_servicio,
           ci.total_guardias_requeridos,
           ci.guardias_presentes,
@@ -343,6 +351,7 @@ async def get_cobertura_por_instalacion_fast_v2(user: dict = Depends(verify_fire
                 "instalacion_rol": row.instalacion_rol,
                 "zona": row.zona,
                 "cliente_rol": row.cliente_rol,
+                "empresa": row.empresa,
                 "tipo_de_servicio": row.tipo_de_servicio if row.tipo_de_servicio else "1 Servicio",
                 "total_guardias_requeridos": row.total_guardias_requeridos,
                 "guardias_presentes": row.guardias_presentes,
@@ -381,6 +390,7 @@ async def get_detalle_todas_instalaciones(
         query_turnos = f"""
         SELECT 
           ci.instalacion_rol,
+          ci.empresa,
           ci.turno as codigo_turno,
           ci.cargo,
           FORMAT_DATETIME('%H:%M', ci.her) as hora_entrada_planificada,
@@ -466,6 +476,7 @@ async def get_detalle_todas_instalaciones(
             if instalacion not in instalaciones_detalle:
                 instalaciones_detalle[instalacion] = {
                     "instalacion": instalacion,
+                    "empresa": row.empresa,
                     "turnos": [],
                     "total_ppc": 0,
                     "ppc_por_turno": []
@@ -547,6 +558,7 @@ async def get_detalle_instalacion(
           ci.cargo,
           FORMAT_DATETIME('%H:%M', ci.her) as hora_entrada_planificada,
           FORMAT_DATETIME('%H:%M', ci.hsr) as hora_salida_planificada,
+          ci.empresa,
           
           -- Información del guardia planificado
           ci.rutrol as rut_planificado,
@@ -593,7 +605,10 @@ async def get_detalle_instalacion(
         results = query_job.result()
         
         turnos = []
+        empresa = None
         for row in results:
+            if empresa is None and hasattr(row, "empresa"):
+                empresa = row.empresa
             turnos.append({
                 "codigo_turno": row.codigo_turno,
                 "cargo": row.cargo,
@@ -614,6 +629,7 @@ async def get_detalle_instalacion(
         
         return {
             "instalacion": instalacion_rol,
+            "empresa": empresa,
             "total_turnos": len(turnos),
             "turnos": turnos
         }
@@ -732,6 +748,7 @@ async def get_cobertura_historica_por_instalacion(
           ah.ano,
           ah.instalacion_rol,
           ah.zona,
+          ah.empresa,
           
           CONCAT('Semana ', CAST(ah.isoweek AS STRING), ' - ', CAST(ah.ano AS STRING)) as periodo,
           
@@ -757,7 +774,7 @@ async def get_cobertura_historica_por_instalacion(
           AND ui.puede_ver = TRUE
           AND ah.dia >= DATE_SUB(CURRENT_DATE(), INTERVAL @dias DAY)
           AND ah.dia <= CURRENT_DATE()
-        GROUP BY ah.semana, ah.isoweek, ah.ano, ah.instalacion_rol, ah.zona
+        GROUP BY ah.semana, ah.isoweek, ah.ano, ah.instalacion_rol, ah.zona, ah.empresa
         ORDER BY ah.ano DESC, ah.isoweek DESC, ah.instalacion_rol
         """
         
@@ -782,6 +799,7 @@ async def get_cobertura_historica_por_instalacion(
                 "periodo": row.periodo,
                 "instalacion_rol": row.instalacion_rol,
                 "zona": row.zona,
+                "empresa": row.empresa,
                 "horas_presupuestadas": float(row.horas_presupuestadas) if row.horas_presupuestadas else 0,
                 "horas_entregadas": float(row.horas_entregadas) if row.horas_entregadas else 0,
                 "horas_faltantes": float(row.horas_faltantes) if row.horas_faltantes else 0,

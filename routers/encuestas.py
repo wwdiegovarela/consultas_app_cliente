@@ -29,7 +29,7 @@ async def obtener_mis_encuestas(user_data: dict = Depends(verify_firebase_token)
         rol = user_data["rol_id"]
         
         # Determinar si es usuario WFSA
-        es_wfsa = rol in ['ADMIN_WFSA', 'SUBGERENTE_WFSA', 'JEFE_WFSA', 'SUPERVISOR_WFSA']
+        es_wfsa = rol in ['ADMIN_WFSA', 'SUBGERENTE_WFSA', 'JEFE_WFSA', 'SUPERVISOR_WFSA', 'GERENTE_WFSA']
         
         # Calcular períodos válidos (bimestral - solo meses pares)
         ahora = datetime.now()
@@ -120,7 +120,7 @@ async def obtener_mis_encuestas(user_data: dict = Depends(verify_firebase_token)
             WHERE s.periodo IN ('{periodos_condition}')
               AND (
                   s.modo = 'compartida'
-                  OR (s.modo = 'individual' AND s.email_destinatario = @user_email)
+                  OR (s.modo = 'individual' AND LOWER(s.email_destinatario) = LOWER(@user_email))
               )
             ORDER BY s.instalacion_rol, s.modo, s.fecha_creacion DESC
             """
