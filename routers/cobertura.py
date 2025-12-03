@@ -749,8 +749,13 @@ async def get_cobertura_historica_por_instalacion(
           ah.instalacion_rol,
           ah.zona,
           ah.empresa,
-          
-          CONCAT('Semana ', CAST(ah.isoweek AS STRING), ' - ', CAST(ah.ano AS STRING)) as periodo,
+          MIN(ah.dia) as fecha_inicio,
+          MAX(ah.dia) as fecha_fin,
+          CONCAT(
+            FORMAT_DATE('%d/%m', MIN(ah.dia)),
+            ' - ',
+            FORMAT_DATE('%d/%m', MAX(ah.dia))
+          ) as periodo,
           
           SUM(ah.horas_planificadas) as horas_presupuestadas,
           SUM(ah.horas_entregadas) as horas_entregadas,
